@@ -1,0 +1,102 @@
+{
+  "name": "Clinic",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "address": {
+      "type": "string"
+    },
+    "city": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "NJ",
+        "NY"
+      ]
+    },
+    "zip": {
+      "type": "string"
+    },
+    "lat": {
+      "type": "number"
+    },
+    "lng": {
+      "type": "number"
+    },
+    "phone": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "verified_yes",
+        "verified_no",
+        "call_back"
+      ],
+      "default": "unknown"
+    },
+    "provider_count": {
+      "type": "integer",
+      "default": 1
+    },
+    "specialties": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          }
+        }
+      },
+      "default": []
+    },
+    "contact_email": {
+      "type": "string"
+    },
+    "npi": {
+      "type": "string"
+    },
+    "last_verified": {
+      "type": "string",
+      "format": "date"
+    },
+    "verified_by": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string",
+      "default": "nppes"
+    }
+  },
+  "required": [
+    "name",
+    "address",
+    "city",
+    "state",
+    "zip",
+    "status"
+  ]
+}

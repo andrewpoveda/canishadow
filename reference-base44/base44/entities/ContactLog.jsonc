@@ -1,0 +1,31 @@
+{
+  "name": "ContactLog",
+  "type": "object",
+  "properties": {
+    "clinic_id": {
+      "type": "string"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "yes",
+        "no",
+        "call_back",
+        "no_answer"
+      ]
+    },
+    "notes": {
+      "type": "string"
+    },
+    "logged_by": {
+      "type": "string"
+    },
+    "contact_email": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "clinic_id",
+    "outcome"
+  ]
+}
