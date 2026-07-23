@@ -22,11 +22,35 @@ ways that matter. Decide these first — Claude Code should confirm each with yo
 | 2. Data model | One `clinics` table, 3-state status, pins = locations only | Added `call_back` status, embedded `providers[]`, `contact_email`, **a second `ContactLog` table**, per-provider yes/no | **Keep the richer base44 model.** The provider-level detail + contact history is the demo. Use both tables below. |
 | 3. Writes / RLS | **No public INSERT** — updates via dashboard, submissions post-event | Public crowdsourced logging — any student logs a call → pin drops/updates | **This is the real call (see §4).** The crowdsourced loop is what won 5th place. Recommend enabling public writes with light guardrails, not locking it down. |
 
-Decision 3 is the important one. The whole "every green pin is a verified phone call"
-flywheel depends on students being able to write. Locking writes to the dashboard
-(SPEC's original plan) kills the feature that made the demo. Recommendation: enable
-public INSERT on `contact_logs` and controlled UPDATE on `clinics` (§4), matching the
-public-INSERT pattern you already run on AP MED's mentor/mentee tables.
+Decision 3 is the important one. The whole crowdsourced flywheel depends on students
+being able to write. Locking writes to the dashboard (SPEC's original plan) kills the
+feature that made the demo. Recommendation: enable public INSERT on `contact_logs` and
+controlled UPDATE on `clinics` (§4), matching the public-INSERT pattern you already run
+on AP MED's mentor/mentee tables.
+
+### 0.1 Two independent axes — colour ≠ verified
+
+This corrects base44's model, which wrongly conflated "has a call outcome" with "verified."
+CanIShadow has **two separate axes**, and they must not be merged:
+
+- **Colour = call outcome** (`status` / `effectiveStatus`): green `verified_yes` · red
+  `verified_no` · yellow `call_back` · gray `unknown` (not yet called).
+- **Trust = `verified` boolean**: `true` = **AP MED team double-checked it**; `false` =
+  **crowdsourced** — a public student logged it, not yet team-confirmed.
+
+So a pin can be *verified green* (team called and confirmed a yes) or *unverified green*
+(a student logged a yes, pending team review) — same colour, different trust. The
+**All / Verified / Unverified filter keys off the `verified` boolean, not off colour.**
+
+Why this matters for Decision 3: open public writes are safe *because* everything a student
+logs lands as `verified = false`. Crowdsourced pins are visibly provisional until your team
+promotes them, so the trust signal ("every green pin is a verified phone call") stays intact
+for the Verified view while the Unverified view carries the community-sourced volume.
+
+> Open sub-question for you: in the filter, should **Unverified** mean *only* crowdsourced
+> logs (with not-yet-called gray pins as a separate third bucket / hidden), or should
+> Unverified = everything not team-verified (crowdsourced **and** uncalled)? Pick one Monday;
+> it only changes the filter predicate, not the schema.
 
 ---
 
@@ -56,8 +80,9 @@ create table clinics (
   providers jsonb not null default '[]',          -- [{ "name": "Dr. Smith", "response": "yes" }]
   contact_email text,
   npi text,
+  verified boolean not null default false,         -- true = AP MED team double-checked; false = crowdsourced/uncalled (drives the Verified/Unverified filter — see §0.1)
   last_verified date,
-  verified_by text,
+  verified_by text,                                -- name of the team member who verified (when verified = true)
   notes text,
   source text not null default 'nppes'             -- 'nppes' | 'student_search' | 'demo'
 );
@@ -125,6 +150,12 @@ find-and-replace map for the port.
 | `LogCallForm.jsx` / `SearchLogForm.jsx` | `base44.entities.ContactLog.create({...})` | `supabase.from('contact_logs').insert({...}).select().single()` |
 | `Search.jsx` | `base44.functions.invoke("tavilySearch", { query })` | `fetch('/api/search', { method:'POST', body: JSON.stringify({ query }) })` |
 | `SearchLogForm.jsx` | `base44.functions.invoke("geocodeAddress", {...})` | `fetch('/api/geocode', { method:'POST', body: JSON.stringify({...}) })` |
+
+**Filter predicate — change from the reference.** `Home.jsx` computes the Verified count as
+`effectiveStatus(c) !== "unknown"` (i.e. "has an outcome"). Per §0.1 that's wrong for us:
+Verified must key off the `verified` boolean. Replace with `clinics.filter(c => c.verified)`
+for the Verified bucket and `c => !c.verified` for Unverified (or the three-way split if you
+choose it). Colour still comes from `effectiveStatus`; the filter no longer does.
 
 Delete entirely: `src/api/base44Client.js`, `src/lib/app-params.js`,
 `src/lib/AuthContext.jsx`, `base44/` folder, and the `@base44/*` deps.
