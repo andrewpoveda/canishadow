@@ -21,6 +21,7 @@ ways that matter. Decide these first — Claude Code should confirm each with yo
 | 1. Map | Mapbox via `react-map-gl` (needs paid token; geocoding TOS headaches) | **Leaflet + free CARTO tiles** (`react-leaflet`) | **Keep Leaflet + CARTO.** Free, no token, no TOS issue, already proven in the export. Drop Mapbox from SPEC. |
 | 2. Data model | One `clinics` table, 3-state status, pins = locations only | Added `call_back` status, embedded `providers[]`, `contact_email`, **a second `ContactLog` table**, per-provider yes/no | **Keep the richer base44 model.** The provider-level detail + contact history is the demo. Use both tables below. |
 | 3. Writes / RLS | **No public INSERT** — updates via dashboard, submissions post-event | Public crowdsourced logging — any student logs a call → pin drops/updates | **This is the real call (see §4).** The crowdsourced loop is what won 5th place. Recommend enabling public writes with light guardrails, not locking it down. |
+| 4. Clinic search | (not specified — SPEC seeds from NPPES) | **Tavily** web search (paid API / hackathon credits, inconsistent data) | **Drop Tavily as the default. Use NPPES** — free, no key, authoritative federal provider registry, same source we seed from. Tavily demoted to an optional feature flag (§4). App runs on $0 with no search key. |
 
 Decision 3 is the important one. The whole crowdsourced flywheel depends on students
 being able to write. Locking writes to the dashboard (SPEC's original plan) kills the
@@ -148,7 +149,7 @@ find-and-replace map for the port.
 | `LogCallForm.jsx` | `base44.entities.Clinic.update(id, updates)` | `supabase.from('clinics').update(updates).eq('id', id).select().single()` |
 | `ContactHistory.jsx` | `base44.entities.ContactLog.filter({ clinic_id }, "-created_date")` | `supabase.from('contact_logs').select('*').eq('clinic_id', id).order('created_at', { ascending: false })` |
 | `LogCallForm.jsx` / `SearchLogForm.jsx` | `base44.entities.ContactLog.create({...})` | `supabase.from('contact_logs').insert({...}).select().single()` |
-| `Search.jsx` | `base44.functions.invoke("tavilySearch", { query })` | `fetch('/api/search', { method:'POST', body: JSON.stringify({ query }) })` |
+| `Search.jsx` | `base44.functions.invoke("tavilySearch", { query })` | `fetch('/api/search', { method:'POST', body: JSON.stringify({ city, state, specialty }) })` — now NPPES-backed (§4), structured input not free text |
 | `SearchLogForm.jsx` | `base44.functions.invoke("geocodeAddress", {...})` | `fetch('/api/geocode', { method:'POST', body: JSON.stringify({...}) })` |
 
 **Filter predicate — change from the reference.** `Home.jsx` computes the Verified count as
@@ -168,42 +169,112 @@ Delete entirely: `src/api/base44Client.js`, `src/lib/app-params.js`,
 
 Both base44 Deno functions port almost line-for-line to App Router route handlers.
 
-### `src/app/api/search/route.ts` (was `tavilySearch`)
+### Clinic search — provider abstraction (NPPES default, no Tavily lock-in)
 
-Server-side only — keep the Tavily key off the client.
+**Decision (§0 row 4):** search is never hardcoded to a vendor. It goes behind a small
+`ClinicSearchProvider` interface with swappable implementations. Default = **NPPES**
+(free, no key, medical-specific, authoritative). Tavily is an optional flag using your
+hackathon credits — off by default, and if it's off or out of credits the app falls back
+to NPPES with zero breakage. Manual entry in `SearchLogForm` is always the final fallback.
+
+```
+src/lib/search/
+├── types.ts        # ClinicSearchResult, ClinicSearchProvider interface
+├── nppes.ts        # default — free federal NPI registry
+├── tavily.ts       # optional — only used if SEARCH_PROVIDER=tavily & key present
+└── index.ts        # picks provider from env, defaults to nppes
+```
+
+```ts
+// src/lib/search/types.ts
+export type ClinicSearchResult = {
+  name: string; phone?: string;
+  address?: string; city?: string; state?: string; zip?: string;
+  npi?: string; specialties?: string[];
+};
+export interface ClinicSearchProvider {
+  search(input: { city: string; state: string; specialty?: string }): Promise<ClinicSearchResult[]>;
+}
+```
+
+#### `src/lib/search/nppes.ts` (default — free, no key)
+
+NPPES NPI Registry API is public domain, no auth, and returns clinic name + practice-location
+address + phone, filtered to real providers. Same source as the seed pipeline (SPEC.md §Seed),
+so the taxonomy-prefix filtering matches.
+
+```ts
+import type { ClinicSearchProvider, ClinicSearchResult } from './types';
+
+// FM 207Q*, IM 207R*, Peds 2080* — keep in sync with the seed pipeline
+const KEEP = ['207Q', '207R', '2080'];
+
+export const nppes: ClinicSearchProvider = {
+  async search({ city, state, specialty }) {
+    const params = new URLSearchParams({
+      version: '2.1', city, state, limit: '50',
+      ...(specialty ? { taxonomy_description: specialty } : {}),
+    });
+    const res = await fetch(`https://npiregistry.cms.hhs.gov/api/?${params}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+
+    return (data.results || [])
+      .filter((r: any) => (r.taxonomies || []).some((t: any) => KEEP.some((k) => t.code?.startsWith(k))))
+      .map((r: any): ClinicSearchResult => {
+        const loc = (r.addresses || []).find((a: any) => a.address_purpose === 'LOCATION') || r.addresses?.[0] || {};
+        const name = r.basic?.organization_name
+          || [r.basic?.first_name, r.basic?.last_name].filter(Boolean).join(' ')
+          || `Medical Office — ${loc.address_1 || ''}`;
+        return {
+          name, phone: loc.telephone_number, address: loc.address_1,
+          city: loc.city, state: loc.state, zip: (loc.postal_code || '').slice(0, 5),
+          npi: r.number,
+          specialties: (r.taxonomies || []).map((t: any) => t.desc).filter(Boolean),
+        };
+      });
+  },
+};
+```
+
+#### `src/lib/search/index.ts`
+
+```ts
+import { nppes } from './nppes';
+// import { tavily } from './tavily'; // optional — only if you wire it later
+export function getSearchProvider() {
+  // if (process.env.SEARCH_PROVIDER === 'tavily' && process.env.TAVILY_API_KEY) return tavily;
+  return nppes;
+}
+```
+
+#### `src/app/api/search/route.ts`
 
 ```ts
 export const runtime = 'nodejs';
+import { getSearchProvider } from '@/lib/search';
 
 export async function POST(req: Request) {
-  const { query } = await req.json();
-  if (!query) return Response.json({ error: 'query required' }, { status: 400 });
-
-  const res = await fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.TAVILY_API_KEY}`,
-    },
-    body: JSON.stringify({
-      query: `${query} clinic doctor office phone number address`,
-      max_results: 8,
-      search_depth: 'basic',
-    }),
-  });
-  if (!res.ok) return Response.json({ error: 'search failed' }, { status: 502 });
-
-  const data = await res.json();
-  const phoneRe = /\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}/g;
-  const results = (data.results || []).map((r: any) => ({
-    title: r.title,
-    url: r.url,
-    content: (r.content || '').slice(0, 320),
-    phones: [...new Set(((r.content || '').match(phoneRe) || []).slice(0, 3))],
-  }));
-  return Response.json({ results });
+  const { city, state, specialty } = await req.json();
+  if (!city || !state) return Response.json({ error: 'city and state required' }, { status: 400 });
+  try {
+    const results = await getSearchProvider().search({ city, state, specialty });
+    return Response.json({ results });
+  } catch {
+    return Response.json({ error: 'search failed' }, { status: 502 });
+  }
 }
 ```
+
+**UI adaptation:** NPPES needs structured `city` + `state` (and optional specialty), not a
+free-text blob. Change the search form from one text box to: a city input, an NJ/NY select,
+and an optional specialty select (Family Medicine / Internal Medicine / Pediatrics). The
+result card + `SearchLogForm` already carry name/phone/address, so they map onto
+`ClinicSearchResult` directly. Manual entry stays available for anything search misses.
+
+Tavily (`reference-base44/base44/functions/tavilySearch/entry.ts`) is kept in the reference
+folder only — port it into `src/lib/search/tavily.ts` later *if* you ever want broad-web
+coverage on your credits. Not needed to ship.
 
 ### `src/app/api/geocode/route.ts` (was `geocodeAddress`)
 
@@ -237,9 +308,11 @@ only if a "no" and no prior yes; `call_back` only if it was `unknown`. The pin-c
 lives in `reference-base44/src/lib/status.js` → `effectiveStatus()` — **copy that file as-is.**
 
 ### Guardrails to add during the port (weren't in the 2-hr build)
-- Rate-limit `/api/search` and the clinic-insert path (Tavily costs money; open INSERT invites spam).
-- Server-side geocode validation before an INSERT lands a pin (the demo had a Brooklyn
-  number under a Hoboken clinic — bad search data pollutes the map).
+- Rate-limit the clinic-insert path (open INSERT invites spam). NPPES itself is free, but
+  be polite to it — cache/debounce repeat searches.
+- Server-side geocode validation before an INSERT lands a pin. Less of a risk now that
+  NPPES returns structured, real practice addresses (vs Tavily's scraped web blurbs), but
+  still validate the Census match before dropping a pin.
 - Consider a `verified_at` staleness decay post-event so old "yes" pins fade.
 
 ---
@@ -266,7 +339,7 @@ canishadow/                          # (this repo — build here, NOT in referen
 │   ├── app/
 │   │   ├── layout.tsx               # fonts (Instrument Serif display + mono), metadata
 │   │   ├── page.tsx                 # server comp: fetch clinics, render <MapView/> ('force-dynamic')
-│   │   ├── search/page.tsx          # the Tavily search + log flow
+│   │   ├── search/page.tsx          # NPPES search (city/state/specialty) + log flow
 │   │   └── api/
 │   │       ├── search/route.ts      # §4
 │   │       └── geocode/route.ts     # §4
@@ -280,7 +353,9 @@ canishadow/                          # (this repo — build here, NOT in referen
 │   │   ├── FilterBar.tsx  ├─ Legend.tsx  ├─ Header.tsx  └─ StatusBadge.tsx
 │   ├── lib/
 │   │   ├── supabase.ts              # anon client (AP MED pattern)
-│   │   └── status.ts                # copy reference-base44/src/lib/status.js verbatim
+│   │   ├── status.ts                # copy reference-base44/src/lib/status.js verbatim
+│   │   └── search/                  # ClinicSearchProvider — nppes (default) + optional tavily (§4)
+│   │       ├── types.ts  ├─ nppes.ts  ├─ tavily.ts (optional)  └─ index.ts
 │   └── types/clinic.ts
 ├── scripts/
 │   ├── seed-nppes.ts                # from SPEC.md §Seed pipeline (real data — base44 skipped this)
@@ -302,10 +377,14 @@ built — it hand-seeded ~51 demo pins instead. For real data, build it per SPEC
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=     # seed scripts ONLY — never NEXT_PUBLIC, never client-imported
-TAVILY_API_KEY=                # server-only, used by /api/search
+
+# Optional — leave unset to run 100% free on NPPES:
+# SEARCH_PROVIDER=tavily       # only if you ever opt into broad-web search
+# TAVILY_API_KEY=              # only needed when SEARCH_PROVIDER=tavily
 ```
 
-No Mapbox token (Leaflet + CARTO are free). No geocoder key (Census is free).
+**Supabase keys are the only required secrets.** No Mapbox token (Leaflet + CARTO are free),
+no geocoder key (Census is free), no search key (NPPES is free). The app ships on $0.
 
 ---
 
@@ -326,10 +405,12 @@ No Mapbox token (Leaflet + CARTO are free). No geocoder key (Census is free).
 > Supabase (§3). Seed a few rows by hand to see pins. Checkpoint: tap pin → drawer with
 > provider dropdown + outreach history, on a 390px viewport.
 >
-> **Phase 3 — write path (the flywheel).** `/api/search` + `/api/geocode` route handlers
-> (§4), then `search/page.tsx`, `SearchLogForm`, `LogCallForm` with the exact status-derivation
-> logic. Add the §4 guardrails (rate limit, geocode validation). Checkpoint: search a real
-> clinic → log "said yes" → pin drops green.
+> **Phase 3 — write path (the flywheel).** Build the `ClinicSearchProvider` abstraction
+> with **NPPES as the default provider** (§4) — free, no key, do NOT use Tavily. Then
+> `/api/search` (NPPES-backed) + `/api/geocode` route handlers, then `search/page.tsx` with
+> structured city/state/specialty inputs, `SearchLogForm`, `LogCallForm` with the exact
+> status-derivation logic. Add the §4 guardrails. Checkpoint: search a real clinic → log
+> "said yes" → pin drops green (unverified).
 >
 > **Phase 4 — real data.** `seed-nppes.ts` + `geocode.ts` per SPEC.md §Seed (base44 skipped this).
 >

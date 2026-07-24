@@ -14,9 +14,10 @@ port the good parts, and leave it untouched.
   Note `providers` is an embedded array of {name, response} — same array-column pattern
   as AP MED's specialty[]/can_help_with[].
 
-- **Tavily search** — `base44/functions/tavilySearch/entry.ts`. ~30-line Deno handler,
-  becomes a Next.js route handler (`src/app/api/search/route.ts`) nearly line-for-line.
-  Regex phone extraction included.
+- **Clinic search** — NOT Tavily. The rebuild defaults to **NPPES** (free federal NPI
+  registry, no key), behind a swappable `ClinicSearchProvider` interface. See MIGRATION.md §4.
+  `base44/functions/tavilySearch/entry.ts` is kept here only as an OPTIONAL provider you can
+  wire up later on your hackathon credits — it is not used by default and not required to ship.
 
 - **Geocoding** — `base44/functions/geocodeAddress/entry.ts`. Uses the FREE US Census
   geocoder (no API key, no billing). Keep this instead of Google Places.
