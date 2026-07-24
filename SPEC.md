@@ -22,6 +22,11 @@
 
 ## Stack & conventions (match AP MED patterns)
 
+> **SUPERSEDED (map + env vars) — see MIGRATION.md §0/§7 and build-log.md 2026-07-24.**
+> The app shipped on **Leaflet + free CARTO tiles**, NOT Mapbox. There is no `NEXT_PUBLIC_MAPBOX_TOKEN`
+> — the only required secrets are the three Supabase keys (NPPES search, US Census geocode, and
+> CARTO tiles are all free/no-key). The bullets/env block below are the original pre-build plan.
+
 - Next.js App Router + TypeScript + Tailwind, deployed on Vercel
 - Supabase (Postgres) — **new project**, not the AP MED project
 - Mapbox GL via `react-map-gl`
@@ -39,6 +44,14 @@ SUPABASE_SERVICE_ROLE_KEY=   # seed scripts ONLY — never NEXT_PUBLIC, never im
 ---
 
 ## Database schema
+
+> **SUPERSEDED — see MIGRATION.md §1/§2 (the schema actually built + run in Supabase) and
+> build-log.md 2026-07-24.** The app shipped with **two tables** (`clinics` + `contact_logs`),
+> a **4-state** status (`unknown`/`verified_yes`/`verified_no`/`call_back`), an embedded
+> `providers` jsonb array, a separate `verified` boolean (trust axis, distinct from colour —
+> §0.1), and **public INSERT/UPDATE** RLS (the crowdsourced flywheel). The single-table,
+> 3-state, read-only-RLS design below is the original pre-build plan. The `(address, zip)` dedup
+> key and the NPPES/Census seed pipeline notes further down remain accurate.
 
 One table. Pins are **locations**, not individual providers.
 

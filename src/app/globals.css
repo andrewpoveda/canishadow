@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/*
+  The entire theming surface (PRM §4). No arbitrary color values live in components —
+  if a color isn't a token here, it doesn't ship.
+
+  Note: `callback` (#9A7B2D / tint #F4EDDB) is not in PRM §3.1's original palette because
+  PRM predates the 4-state status model. MIGRATION.md (which wins on schema) added the
+  `call_back` status, and src/lib/status.ts references `bg-callback` / `text-callback` /
+  `bg-callback-tint`. The values come from reference-base44/tailwind.config.js + status.js.
+*/
+@theme {
+  /* palette */
+  --color-paper: #faf9f6;
+  --color-paper-2: #f1efea;
+  --color-ink: #0f1b2d;
+  --color-ink-2: #43506b;
+  --color-ink-3: #8a93a6;
+  --color-verified: #0f5144;
+  --color-verified-tint: #e4efea;
+  --color-declined: #8e3b3b;
+  --color-declined-tint: #f3e7e6;
+  --color-callback: #9a7b2d;
+  --color-callback-tint: #f4eddb;
+  --color-line: #e3e0d8;
+
+  /* type */
+  --font-display: var(--font-instrument-serif), Georgia, serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  /* shape & elevation */
+  --radius-pill: 999px;
+  --radius-sheet: 16px;
+  --shadow-float: 0 8px 28px rgb(15 27 45 / 0.14);
+
+  /* motion */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@layer base {
+  html {
+    background: var(--color-paper);
+    color: var(--color-ink);
+  }
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Leaflet controls, quieted to fit the paper/ink palette. */
+.leaflet-container {
+  background: var(--color-paper-2);
+  font-family: var(--font-sans);
+}
+.leaflet-control-attribution {
+  background: rgb(250 249 246 / 0.8) !important;
+  color: var(--color-ink-3) !important;
+  font-size: 10px;
+}
+.leaflet-control-attribution a {
+  color: var(--color-ink-2) !important;
+}
