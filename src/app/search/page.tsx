@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Search as SearchIcon } from "lucide-react";
 import SearchResultCard from "@/components/SearchResultCard";
+import { track } from "@/lib/analytics";
 import type { ClinicSearchResult } from "@/lib/search/types";
 
 // NPPES-backed search (MIGRATION.md §4). Structured city + NJ/NY + optional specialty,
@@ -35,7 +36,14 @@ export default function SearchPage() {
       });
       if (!res.ok) throw new Error("search failed");
       const data = (await res.json()) as { results?: ClinicSearchResult[] };
-      setResults(data.results || []);
+      const found = data.results || [];
+      setResults(found);
+      track("clinic_searched", {
+        city: city.trim(),
+        state,
+        specialty: specialty || null,
+        result_count: found.length,
+      });
     } catch {
       setError("Search failed. Try again.");
     }

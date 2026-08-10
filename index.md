@@ -9,7 +9,7 @@
 
 ## App (rebuilt on Next.js/Supabase — see build-log.md 2026-07-24)
 
-- `src/app/` — `layout.tsx` (fonts + metadata), `globals.css` (Tailwind v4 `@theme` tokens — the only place colors are defined), `page.tsx` (server, `force-dynamic`, fetches clinics → `HomeClient`), `search/page.tsx` (NPPES search UI), `api/search/route.ts` + `api/geocode/route.ts`
+- `src/app/` — `layout.tsx` (fonts + metadata, wraps app in `PostHogProvider`), `providers.tsx` (client PostHog init — no-op without `NEXT_PUBLIC_POSTHOG_KEY`), `globals.css` (Tailwind v4 `@theme` tokens — the only place colors are defined), `page.tsx` (server, `force-dynamic`, fetches clinics → `HomeClient`), `search/page.tsx` (NPPES search UI), `api/search/route.ts` + `api/geocode/route.ts`
 - `src/components/` — `HomeClient` (orchestrator), `MapView` (Leaflet + CARTO), `ClinicDrawer`, `ProviderList`, `ContactHistory`, `LogCallForm` (status-derivation brain), `SearchResultCard`, `SearchLogForm`, `FilterBar`, `Legend`, `Header`, `StatusBadge`
 - `src/lib/` — `supabase.ts` (anon client), `status.ts` (verbatim from reference), `date.ts` (date-fns helpers), `search/` (`types.ts`, `nppes.ts` default, `tavily.ts` optional, `index.ts`)
 - `src/types/clinic.ts` — domain types mirroring the MIGRATION §1 schema (`Clinic`, `ContactLog`, `Provider`, `ClinicInsert`, status consts)

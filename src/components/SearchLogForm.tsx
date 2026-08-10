@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { todayISODate } from "@/lib/date";
+import { track } from "@/lib/analytics";
 import type { ClinicSearchResult } from "@/lib/search/types";
 import type { ClinicInsert, ClinicStatus } from "@/types/clinic";
 
@@ -133,6 +134,12 @@ export default function SearchLogForm({
       notes: form.notes || null,
       logged_by: form.yourName || null,
       contact_email: form.contactEmail || null,
+    });
+
+    track("clinic_added", {
+      outcome,
+      state: insert.state,
+      has_npi: Boolean(result.npi),
     });
 
     setSaving(false);

@@ -4,6 +4,40 @@ Reverse-chronological record of what was actually built, session by session. New
 
 <!-- Claude Code: append a new entry above this line at the end of every session. Format: date, one-line summary, then bullets for specifics (what shipped, what broke, what changed from plan, and why). -->
 
+## 2026-08-09 — Wire PostHog analytics properly + event capture on the write path
+
+`posthog-js` (1.414.0) was already a dependency but never initialized. Wired it into the App
+Router the proper way and instrumented the two key flows.
+
+**PostHog init:** new `src/app/providers.tsx` — `"use client"` component that runs `posthog.init()`
+in a `useEffect`, **guarded on `NEXT_PUBLIC_POSTHOG_KEY`** so it's a complete no-op when the key
+is unset (app still ships on $0 — Supabase keys stay the only required secrets). Uses
+`defaults: "2025-05-24"` (auto pageviews/pageleaves incl. SPA history changes — no manual
+PostHogPageView needed) + `person_profiles: "identified_only"`. Wrapped `{children}` in
+`layout.tsx`. Added `/ingest` reverse-proxy rewrites + `skipTrailingSlashRedirect: true` to
+`next.config.mjs` (US cloud — `us-assets`/`us.i`; swap to `eu-*` for EU) so ingestion survives
+ad blockers.
+
+**Event capture:** new typed helper `src/lib/analytics.ts` — `track(event, props)` with an
+`EventMap` (event names + property shapes in one place, no magic strings; silent no-op when
+analytics is off). Three events, both surfaces where a call is logged:
+- `clinic_searched` (`search/page.tsx`, on NPPES results) — city, state, specialty, result_count
+- `call_logged` (`LogCallForm`, existing pin) — clinic_id, outcome, resulting_status, has_provider
+- `clinic_added` (`SearchLogForm`, search→add→log) — outcome, state, has_npi
+
+Each fires only after the DB write succeeds, so failed attempts aren't counted.
+
+**Env / deploy:** `NEXT_PUBLIC_POSTHOG_KEY` + `NEXT_PUBLIC_POSTHOG_HOST` documented in
+`.env.local.example` (placeholder `phc_xxx`) and added to `.env.local` + Vercel. Note: user
+first edited `.env.local.example` by mistake (still commented) — real key belongs only in
+`.env.local` (gitignored) + Vercel; example placeholder restored. `NEXT_PUBLIC_*` are inlined
+at build time, so Vercel needs a deploy *after* the vars are set.
+
+**Verified:** `npx tsc --noEmit` clean; dev server restarted, key confirmed inlined into
+`.next/static/chunks/app/layout.js`; `/` and `/search` both 200. `index.md` updated with
+`providers.tsx`. No new deps installed (posthog-js was already present) — did not touch the
+lockfile / the separate `npm audit` severity work in flight.
+
 ## 2026-07-24 — Full rebuild on Next.js/Supabase in one pass (base44 → our stack)
 
 Rebuilt the entire base44 MVP on our stack per MIGRATION.md, in a single pass (read path +

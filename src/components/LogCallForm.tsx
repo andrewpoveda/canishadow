@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { todayISODate } from "@/lib/date";
+import { track } from "@/lib/analytics";
 import type { Clinic, ContactLog, Provider } from "@/types/clinic";
 
 // Status-derivation logic (MIGRATION.md §4 — "the product's brain"), ported exactly from
@@ -89,6 +90,13 @@ export default function LogCallForm({
       setError("Couldn't save that call. Try again.");
       return;
     }
+
+    track("call_logged", {
+      clinic_id: clinic.id,
+      outcome,
+      resulting_status: updates.status ?? clinic.status,
+      has_provider: Boolean(providerName && outcome !== "call_back"),
+    });
 
     onLogged(log as ContactLog, (updatedRow as Clinic) ?? { ...clinic, ...updates });
   };
