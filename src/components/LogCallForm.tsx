@@ -1,19 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { supabase } from "@/lib/supabase";
-import { todayISODate } from "@/lib/date";
+import { useRef, useState } from "react";
 import { track } from "@/lib/analytics";
-import type { Clinic, ContactLog, Provider } from "@/types/clinic";
+import { logClinicCall, type CallOutcome } from "@/lib/log-clinic-call";
+import type { Clinic, ContactLog } from "@/types/clinic";
 
-// Status-derivation logic (MIGRATION.md §4 — "the product's brain"), ported exactly from
-// reference-base44/src/components/canishadow/LogCallForm.jsx. base44 → Supabase, moment → date-fns.
-//
-// Note: logging a call does NOT flip `verified` — a student's log stays crowdsourced
-// (verified stays whatever it was) until the AP MED team promotes it (§0.1).
-type Outcome = "yes" | "no" | "call_back";
-
-const OUTCOMES: { key: Outcome; label: string }[] = [
+// The database transaction derives status while holding the clinic row lock, so simultaneous
+// calls cannot overwrite each other. A student's log never flips the team's `verified` flag.
+const OUTCOMES: { key: CallOutcome; label: string }[] = [
   { key: "yes", label: "Said yes" },
   { key: "no", label: "Said no" },
   { key: "call_back", label: "Call back later" },
@@ -26,67 +20,34 @@ export default function LogCallForm({
   clinic: Clinic;
   onLogged: (log: ContactLog, updatedClinic: Clinic) => void;
 }) {
-  const [outcome, setOutcome] = useState<Outcome>("yes");
+  const [outcome, setOutcome] = useState<CallOutcome>("yes");
   const [providerName, setProviderName] = useState("");
   const [yourName, setYourName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submissionKey = useRef<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setError(null);
 
-    const providers: Provider[] = [...(clinic.providers || [])];
-    if (providerName && outcome !== "call_back") {
-      providers.push({ name: providerName, response: outcome });
-    }
-    const hasYes = providers.some((p) => p.response === "yes");
-
-    const updates: Partial<Clinic> = {
-      providers,
-      last_verified: todayISODate(),
-      verified_by: yourName || clinic.verified_by || "student",
-    };
-    if (outcome === "yes") updates.status = "verified_yes";
-    else if (outcome === "no" && !hasYes) updates.status = "verified_no";
-    else if (
-      outcome === "call_back" &&
-      !hasYes &&
-      clinic.status === "unknown"
-    )
-      updates.status = "call_back";
-    if (contactEmail) updates.contact_email = contactEmail;
-
-    const { data: updatedRow, error: updateError } = await supabase
-      .from("clinics")
-      .update(updates)
-      .eq("id", clinic.id)
-      .select()
-      .single();
-
-    if (updateError) {
-      setSaving(false);
-      setError("Couldn't save that call. Try again.");
-      return;
-    }
-
-    const { data: log, error: logError } = await supabase
-      .from("contact_logs")
-      .insert({
-        clinic_id: clinic.id,
+    submissionKey.current ??= crypto.randomUUID();
+    let result;
+    try {
+      result = await logClinicCall({
+        submissionKey: submissionKey.current,
+        clinicId: clinic.id,
         outcome,
-        notes: notes || null,
-        logged_by: yourName || null,
-        contact_email: contactEmail || null,
-      })
-      .select()
-      .single();
-
-    setSaving(false);
-    if (logError || !log) {
+        providerName,
+        loggedBy: yourName,
+        contactEmail,
+        notes,
+      });
+    } catch {
+      setSaving(false);
       setError("Couldn't save that call. Try again.");
       return;
     }
@@ -94,11 +55,12 @@ export default function LogCallForm({
     track("call_logged", {
       clinic_id: clinic.id,
       outcome,
-      resulting_status: updates.status ?? clinic.status,
+      resulting_status: result.clinic.status,
       has_provider: Boolean(providerName && outcome !== "call_back"),
     });
 
-    onLogged(log as ContactLog, (updatedRow as Clinic) ?? { ...clinic, ...updates });
+    setSaving(false);
+    onLogged(result.log, result.clinic);
   };
 
   const inputClass =
@@ -125,6 +87,7 @@ export default function LogCallForm({
           value={providerName}
           onChange={(e) => setProviderName(e.target.value)}
           placeholder="Provider name (e.g. Dr. Smith) — optional"
+          maxLength={200}
           className={inputClass}
         />
       )}
@@ -132,6 +95,7 @@ export default function LogCallForm({
         value={yourName}
         onChange={(e) => setYourName(e.target.value)}
         placeholder="Your name"
+        maxLength={200}
         className={inputClass}
       />
       <input
@@ -139,6 +103,7 @@ export default function LogCallForm({
         onChange={(e) => setContactEmail(e.target.value)}
         type="email"
         placeholder="Clinic contact email — optional"
+        maxLength={320}
         className={inputClass}
       />
       <textarea
@@ -146,6 +111,7 @@ export default function LogCallForm({
         onChange={(e) => setNotes(e.target.value)}
         placeholder="Notes (who you spoke to, what they said)"
         rows={2}
+        maxLength={2000}
         className="w-full rounded-sheet border border-line bg-paper px-4 py-2.5 text-[13px] text-ink placeholder:text-ink-3 focus:outline-none focus:ring-2 focus:ring-ink"
       />
       {error && <p className="text-[13px] text-declined">{error}</p>}

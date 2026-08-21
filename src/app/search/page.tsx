@@ -5,15 +5,18 @@ import Link from "next/link";
 import { ArrowLeft, Search as SearchIcon } from "lucide-react";
 import SearchResultCard from "@/components/SearchResultCard";
 import { track } from "@/lib/analytics";
-import type { ClinicSearchResult } from "@/lib/search/types";
+import { US_STATES, type UsStateCode } from "@/lib/us-states";
+import {
+  SEARCH_SPECIALTIES,
+  type ClinicSearchInput,
+  type ClinicSearchResult,
+} from "@/lib/search/types";
 
-// NPPES-backed search (MIGRATION.md §4). Structured city + NJ/NY + optional specialty,
+// NPPES-backed search (MIGRATION.md §4). Structured U.S. city + state + optional specialty,
 // not the free-text box the base44/Tavily version used.
-const SPECIALTIES = ["Family Medicine", "Internal Medicine", "Pediatrics"];
-
 export default function SearchPage() {
   const [city, setCity] = useState("");
-  const [state, setState] = useState("NJ");
+  const [state, setState] = useState<UsStateCode>("NJ");
   const [specialty, setSpecialty] = useState("");
   const [results, setResults] = useState<ClinicSearchResult[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -24,6 +27,7 @@ export default function SearchPage() {
     if (!city.trim()) return;
     setLoading(true);
     setError(null);
+    setResults(null);
     try {
       const res = await fetch("/api/search", {
         method: "POST",
@@ -34,20 +38,29 @@ export default function SearchPage() {
           specialty: specialty || undefined,
         }),
       });
-      if (!res.ok) throw new Error("search failed");
-      const data = (await res.json()) as { results?: ClinicSearchResult[] };
+      const data = (await res.json()) as {
+        error?: string;
+        query?: ClinicSearchInput;
+        results?: ClinicSearchResult[];
+      };
+      if (!res.ok) throw new Error(data.error || "Search failed. Try again.");
       const found = data.results || [];
       setResults(found);
       track("clinic_searched", {
-        city: city.trim(),
-        state,
+        city: data.query?.city || city.trim(),
+        state: data.query?.state || state,
         specialty: specialty || null,
         result_count: found.length,
       });
-    } catch {
-      setError("Search failed. Try again.");
+    } catch (searchError) {
+      setError(
+        searchError instanceof Error
+          ? searchError.message
+          : "Search failed. Try again.",
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const inputClass =
@@ -81,17 +94,23 @@ export default function SearchPage() {
             <input
               value={city}
               onChange={(e) => setCity(e.target.value)}
-              placeholder="City (e.g. Hoboken)"
+              placeholder="City (e.g. New York City)"
+              autoComplete="address-level2"
+              required
               className={inputClass}
             />
             <select
               value={state}
-              onChange={(e) => setState(e.target.value)}
+              onChange={(e) => setState(e.target.value as UsStateCode)}
               aria-label="State"
-              className="min-h-[44px] rounded-pill border border-line bg-paper px-3 text-[15px] text-ink"
+              autoComplete="address-level1"
+              className="min-h-[44px] w-28 shrink-0 rounded-pill border border-line bg-paper px-3 text-[15px] text-ink"
             >
-              <option value="NJ">NJ</option>
-              <option value="NY">NY</option>
+              {US_STATES.map(({ code, name }) => (
+                <option key={code} value={code}>
+                  {code} — {name}
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex gap-2">
@@ -101,8 +120,8 @@ export default function SearchPage() {
               aria-label="Specialty"
               className={`${inputClass} appearance-none`}
             >
-              <option value="">Any specialty</option>
-              {SPECIALTIES.map((s) => (
+              <option value="">All primary care</option>
+              {SEARCH_SPECIALTIES.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
@@ -126,8 +145,8 @@ export default function SearchPage() {
           <div className="mt-6 space-y-3">
             {results.length === 0 && (
               <p className="text-[15px] text-ink-2">
-                No results — try a different city or specialty, or add the clinic
-                manually below.
+                No primary care results found. Try the city&apos;s official name or a
+                different specialty.
               </p>
             )}
             {results.map((r, i) => (

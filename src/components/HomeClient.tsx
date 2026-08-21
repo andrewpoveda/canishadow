@@ -6,8 +6,8 @@ import ClinicDrawer from "@/components/ClinicDrawer";
 import FilterBar, { type FilterKey } from "@/components/FilterBar";
 import Header from "@/components/Header";
 import Legend from "@/components/Legend";
+import { fetchMappableClinics } from "@/lib/fetch-clinics";
 import { effectiveStatus } from "@/lib/status";
-import { supabase } from "@/lib/supabase";
 import type { Clinic } from "@/types/clinic";
 
 // Leaflet touches window/document — never SSR it.
@@ -35,27 +35,33 @@ export default function HomeClient({
   // freshly-logged pins appear and the filter counts are correct.
   useEffect(() => {
     let active = true;
-    supabase
-      .from("clinics")
-      .select("*")
-      .limit(1000)
-      .then(({ data }) => {
-        if (!active || !data) return;
-        const fresh = (data as Clinic[]).filter(
-          (c) => c.lat != null && c.lng != null && c.notes !== "geocode_failed",
-        );
+    const deepLinkId = new URLSearchParams(window.location.search).get("clinic");
+    if (deepLinkId) {
+      const initialMatch = initialClinics.find((c) => c.id === deepLinkId);
+      if (initialMatch) setSelected(initialMatch);
+    }
+
+    fetchMappableClinics()
+      .then((fresh) => {
+        if (!active) return;
         setClinics(fresh);
         // Deep-link: /?clinic=<id> opens that clinic's drawer (works for just-logged pins too).
-        const id = new URLSearchParams(window.location.search).get("clinic");
-        if (id) {
-          const c = fresh.find((x) => x.id === id);
-          if (c) setSelected(c);
+        if (deepLinkId) {
+          const deepLinked = fresh.find((x) => x.id === deepLinkId);
+          if (deepLinked) {
+            setSelected((current) =>
+              !current || current.id === deepLinkId ? deepLinked : current,
+            );
+          }
         }
+      })
+      .catch(() => {
+        // Keep the server-rendered snapshot when background revalidation fails.
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [initialClinics]);
 
   const handleClinicUpdate = (updated: Clinic) => {
     setClinics((cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
@@ -84,7 +90,7 @@ export default function HomeClient({
     <div className="fixed inset-0 overflow-hidden bg-paper">
       <MapView
         clinics={visible}
-        selectedId={selected?.id}
+        selectedClinic={selected}
         onSelect={setSelected}
       />
       <div className="pointer-events-none absolute inset-x-0 top-0 z-[1000]">

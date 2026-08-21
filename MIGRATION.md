@@ -69,7 +69,14 @@ create table clinics (
   name text not null,
   address text not null,
   city text not null,
-  state text not null check (state in ('NJ','NY')),
+  state text not null check (state in (
+    'AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL',
+    'GA','HI','ID','IL','IN','IA','KS','KY','LA','ME',
+    'MD','MA','MI','MN','MS','MO','MT','NE','NV','NH',
+    'NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI',
+    'SC','SD','TN','TX','UT','VT','VA','WA','WV','WI',
+    'WY','AS','GU','MP','PR','VI'
+  )),
   zip text not null,
   lat double precision,
   lng double precision,
@@ -90,6 +97,7 @@ create table clinics (
 
 create index clinics_status_idx on clinics (status);
 create index clinics_state_idx  on clinics (state);
+create unique index clinics_addr_zip_key on clinics (address, zip);
 
 -- ---------- contact_logs ----------
 create table contact_logs (
@@ -99,10 +107,13 @@ create table contact_logs (
   outcome text not null check (outcome in ('yes','no','call_back','no_answer')),
   notes text,
   logged_by text,
-  contact_email text
+  contact_email text,
+  submission_key uuid                         -- idempotency key; null only on legacy rows
 );
 
 create index contact_logs_clinic_idx on contact_logs (clinic_id);
+create unique index contact_logs_submission_key_key on contact_logs (submission_key)
+  where submission_key is not null;
 ```
 
 **Naming note:** base44 uses `created_date`; we use Postgres-standard `created_at`.
@@ -113,8 +124,13 @@ Every `-created_date` sort in the reference code becomes
 
 ## 2. RLS policies
 
-Reflects Decision 3 (crowdsourced writes ON). If you decide to lock writes down instead,
-drop the INSERT/UPDATE policies and do all writes with the service-role key.
+Reflects Decision 3 (crowdsourced writes ON). Browser writes use the narrowly granted
+`log_clinic_call(...)` security-definer RPC from
+`supabase/migrations/202608210001_atomic_call_logging.sql`. It locks the clinic row,
+derives status from current database state, inserts the ledger entry in the same transaction,
+and uses `submission_key` to make network retries idempotent. The historical broad policies
+below remain temporarily for backward compatibility during the coordinated app/database
+rollout; remove them after the RPC-backed client is live everywhere.
 
 ```sql
 alter table clinics       enable row level security;
@@ -144,11 +160,11 @@ find-and-replace map for the port.
 
 | Reference file | base44 call | Supabase / Next.js replacement |
 |---|---|---|
-| `pages/Home.jsx` | `base44.entities.Clinic.list(null, 1000)` | `supabase.from('clinics').select('*').limit(1000)` |
-| `SearchLogForm.jsx` | `base44.entities.Clinic.create({...})` | `supabase.from('clinics').insert({...}).select().single()` |
-| `LogCallForm.jsx` | `base44.entities.Clinic.update(id, updates)` | `supabase.from('clinics').update(updates).eq('id', id).select().single()` |
+| `pages/Home.jsx` | `base44.entities.Clinic.list(null, 1000)` | `fetchMappableClinics()` paginates stable 1,000-row Supabase ranges until the full ledger is loaded |
+| `SearchLogForm.jsx` | clinic create + call log | `logClinicCall(...)` → transactional `log_clinic_call` RPC |
+| `LogCallForm.jsx` | clinic update + call log | `logClinicCall(...)` → the same row-locking RPC |
 | `ContactHistory.jsx` | `base44.entities.ContactLog.filter({ clinic_id }, "-created_date")` | `supabase.from('contact_logs').select('*').eq('clinic_id', id).order('created_at', { ascending: false })` |
-| `LogCallForm.jsx` / `SearchLogForm.jsx` | `base44.entities.ContactLog.create({...})` | `supabase.from('contact_logs').insert({...}).select().single()` |
+| `LogCallForm.jsx` / `SearchLogForm.jsx` | `base44.entities.ContactLog.create({...})` | included atomically in `log_clinic_call`; retries reuse `submission_key` |
 | `Search.jsx` | `base44.functions.invoke("tavilySearch", { query })` | `fetch('/api/search', { method:'POST', body: JSON.stringify({ city, state, specialty }) })` — now NPPES-backed (§4), structured input not free text |
 | `SearchLogForm.jsx` | `base44.functions.invoke("geocodeAddress", {...})` | `fetch('/api/geocode', { method:'POST', body: JSON.stringify({...}) })` |
 
@@ -175,12 +191,14 @@ Both base44 Deno functions port almost line-for-line to App Router route handler
 `ClinicSearchProvider` interface with swappable implementations. Default = **NPPES**
 (free, no key, medical-specific, authoritative). Tavily is an optional flag using your
 hackathon credits — off by default, and if it's off or out of credits the app falls back
-to NPPES with zero breakage. Manual entry in `SearchLogForm` is always the final fallback.
+to NPPES with zero breakage. The current shipped UI does not include manual entry.
 
 ```
 src/lib/search/
 ├── types.ts        # ClinicSearchResult, ClinicSearchProvider interface
+├── validation.ts   # request validation + NYC/DC city aliases
 ├── nppes.ts        # default — free federal NPI registry
+├── nppes.test.ts   # provider/validation regressions
 ├── tavily.ts       # optional — only used if SEARCH_PROVIDER=tavily & key present
 └── index.ts        # picks provider from env, defaults to nppes
 ```
@@ -189,53 +207,31 @@ src/lib/search/
 // src/lib/search/types.ts
 export type ClinicSearchResult = {
   name: string; phone?: string;
-  address?: string; city?: string; state?: string; zip?: string;
-  npi?: string; specialties?: string[];
+  address?: string; city?: string; state?: UsStateCode; zip?: string;
+  npi?: string; specialties?: string[]; providerCount?: number;
+  enumerationType?: 'NPI-1' | 'NPI-2';
 };
 export interface ClinicSearchProvider {
-  search(input: { city: string; state: string; specialty?: string }): Promise<ClinicSearchResult[]>;
+  search(input: ClinicSearchInput): Promise<ClinicSearchResult[]>;
 }
 ```
 
 #### `src/lib/search/nppes.ts` (default — free, no key)
 
-NPPES NPI Registry API is public domain, no auth, and returns clinic name + practice-location
-address + phone, filtered to real providers. Same source as the seed pipeline (SPEC.md §Seed),
-so the taxonomy-prefix filtering matches.
+NPPES NPI Registry API is public, read-only, and requires no auth. It returns registered
+provider/organization names, practice locations, and phone numbers; an NPI is an
+authoritative registry identifier, not proof of licensure, credentialing, or shadowing
+availability. The production adapter in `src/lib/search/nppes.ts` is the source of truth:
 
-```ts
-import type { ClinicSearchProvider, ClinicSearchResult } from './types';
-
-// FM 207Q*, IM 207R*, Peds 2080* — keep in sync with the seed pipeline
-const KEEP = ['207Q', '207R', '2080'];
-
-export const nppes: ClinicSearchProvider = {
-  async search({ city, state, specialty }) {
-    const params = new URLSearchParams({
-      version: '2.1', city, state, limit: '50',
-      ...(specialty ? { taxonomy_description: specialty } : {}),
-    });
-    const res = await fetch(`https://npiregistry.cms.hhs.gov/api/?${params}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-
-    return (data.results || [])
-      .filter((r: any) => (r.taxonomies || []).some((t: any) => KEEP.some((k) => t.code?.startsWith(k))))
-      .map((r: any): ClinicSearchResult => {
-        const loc = (r.addresses || []).find((a: any) => a.address_purpose === 'LOCATION') || r.addresses?.[0] || {};
-        const name = r.basic?.organization_name
-          || [r.basic?.first_name, r.basic?.last_name].filter(Boolean).join(' ')
-          || `Medical Office — ${loc.address_1 || ''}`;
-        return {
-          name, phone: loc.telephone_number, address: loc.address_1,
-          city: loc.city, state: loc.state, zip: (loc.postal_code || '').slice(0, 5),
-          npi: r.number,
-          specialties: (r.taxonomies || []).map((t: any) => t.desc).filter(Boolean),
-        };
-      });
-  },
-};
-```
+1. Query each requested primary-care taxonomy (all three when no specialty is selected)
+   separately for NPI-2 organizations and NPI-1 individuals, up to NPPES's 200-row limit.
+2. Validate responses with Zod and keep active 207Q/207R/2080 taxonomy records only.
+3. Choose an exact requested-city/state address from primary or secondary practice locations;
+   never fall back to mailing/billing addresses.
+4. Group by normalized `(address, zip)`, prefer NPI-2 names, preserve provider counts, rank
+   organizations/phone-bearing results first, and return at most 50 cards.
+5. Time out, retry transient failures once, accept partial NPI-type success, and cache bounded
+   repeat searches for 15 minutes.
 
 #### `src/lib/search/index.ts`
 
@@ -250,27 +246,18 @@ export function getSearchProvider() {
 
 #### `src/app/api/search/route.ts`
 
-```ts
-export const runtime = 'nodejs';
-import { getSearchProvider } from '@/lib/search';
-
-export async function POST(req: Request) {
-  const { city, state, specialty } = await req.json();
-  if (!city || !state) return Response.json({ error: 'city and state required' }, { status: 400 });
-  try {
-    const results = await getSearchProvider().search({ city, state, specialty });
-    return Response.json({ results });
-  } catch {
-    return Response.json({ error: 'search failed' }, { status: 502 });
-  }
-}
-```
+The Node route rejects oversized/invalid bodies, canonicalizes aliases through
+`parseSearchInput`, returns the canonical query with its results, disables response caching,
+and returns a clear 502 when every upstream registry request fails.
 
 **UI adaptation:** NPPES needs structured `city` + `state` (and optional specialty), not a
-free-text blob. Change the search form from one text box to: a city input, an NJ/NY select,
-and an optional specialty select (Family Medicine / Internal Medicine / Pediatrics). The
-result card + `SearchLogForm` already carry name/phone/address, so they map onto
-`ClinicSearchResult` directly. Manual entry stays available for anything search misses.
+free-text blob. The shipped form accepts every U.S. state and territory plus an optional
+specialty (Family Medicine / Internal Medicine / Pediatrics). `NYC`, `New York City`, and
+`Manhattan` normalize to NPPES's `New York` value. An "all primary care" search issues
+targeted requests for all three supported taxonomies, queries both NPI-1 and NPI-2, includes
+matching secondary `practiceLocations`, then groups results by normalized `(address, zip)`
+and prefers organization names. The result card + `SearchLogForm` carry the structured
+name/phone/address directly. There is no manual-entry fallback in the current UI.
 
 Tavily (`reference-base44/base44/functions/tavilySearch/entry.ts`) is kept in the reference
 folder only — port it into `src/lib/search/tavily.ts` later *if* you ever want broad-web
@@ -339,7 +326,7 @@ canishadow/                          # (this repo — build here, NOT in referen
 │   ├── app/
 │   │   ├── layout.tsx               # fonts (Instrument Serif display + mono), metadata
 │   │   ├── page.tsx                 # server comp: fetch clinics, render <MapView/> ('force-dynamic')
-│   │   ├── search/page.tsx          # NPPES search (city/state/specialty) + log flow
+│   │   ├── search/page.tsx          # Nationwide NPPES search (city/state/specialty) + log flow
 │   │   └── api/
 │   │       ├── search/route.ts      # §4
 │   │       └── geocode/route.ts     # §4
@@ -408,7 +395,7 @@ no geocoder key (Census is free), no search key (NPPES is free). The app ships o
 > **Phase 3 — write path (the flywheel).** Build the `ClinicSearchProvider` abstraction
 > with **NPPES as the default provider** (§4) — free, no key, do NOT use Tavily. Then
 > `/api/search` (NPPES-backed) + `/api/geocode` route handlers, then `search/page.tsx` with
-> structured city/state/specialty inputs, `SearchLogForm`, `LogCallForm` with the exact
+> structured U.S. city/state/specialty inputs, `SearchLogForm`, `LogCallForm` with the exact
 > status-derivation logic. Add the §4 guardrails. Checkpoint: search a real clinic → log
 > "said yes" → pin drops green (unverified).
 >

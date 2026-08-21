@@ -19,12 +19,12 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "CanIShadow — clinics that take shadowing students",
   description:
-    "Open-source map of NJ/NYC clinics that do or don't take shadowing students. Every green pin is a verified phone call. Free & open source, built by Andrew Poveda · AP MED.",
+    "Open-source map of U.S. clinics that do or don't take shadowing students. Every green pin is a verified phone call. Free & open source, built by Andrew Poveda · AP MED.",
   metadataBase: new URL("https://canishadow.com"),
   openGraph: {
     title: "CanIShadow",
     description:
-      "Open-source map of NJ/NYC clinics that take shadowing students. Every green pin is a verified phone call.",
+      "Open-source map of U.S. clinics that take shadowing students. Every green pin is a verified phone call.",
     type: "website",
   },
 };

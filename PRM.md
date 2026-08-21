@@ -122,9 +122,9 @@ Usage in components: `bg-paper`, `text-ink-2`, `bg-verified`, `rounded-pill`, `s
 
 ### 5.1 Basemap
 
-- Style: `mapbox://styles/mapbox/light-v11`, further quieted at runtime: reduce POI label density, mute road colors toward `paper-2` via style config (`config` param or a forked style in Mapbox Studio if runtime overrides fight back — timebox to 30 min, the stock light style is acceptable).
+- Style: free CARTO `light_all` raster tiles rendered by Leaflet (no Mapbox token or paid tile dependency).
 - Rationale: the basemap must be *background*. Status colors are the only saturated elements on screen.
-- Initial viewport: `{ latitude: 40.72, longitude: -74.10, zoom: 10.5 }`. `maxBounds` loosely around NJ/NYC so demo users can't scroll to Kansas.
+- Initial viewport: `{ latitude: 40.72, longitude: -74.10, zoom: 11 }`. Navigation is intentionally unbounded so users can pan and zoom to any U.S. city; a selected or deep-linked clinic recenters the map at neighborhood zoom and remains in the visible strip above the mobile drawer.
 - Attribution control bottom-left, compact.
 
 ### 5.2 Pin system (hue + size + halo — never hue alone)
@@ -138,7 +138,7 @@ Usage in components: `bg-paper`, `text-ink-2`, `bg-verified`, `rounded-pill`, `s
 - Verified-yes pins render on top of the stack (layer order: unknown → no → yes).
 - Clusters: `paper` circle, `line` border, `ink` count in `font-mono` 12px. Cluster size steps at 10/50/150 points (28/36/44px). Clusters are deliberately achromatic — a cluster contains mixed statuses, so it must not imply one.
 - Selected pin: 1.4× scale + halo, drawer opens.
-- Implementation: Mapbox layers (`circle` paint properties) rather than DOM markers — 900+ DOM markers will chug on a phone; circle layers won't.
+- Implementation: Leaflet SVG `CircleMarker` layers; future bulk nationwide seeds should add clustering or viewport aggregation before the map becomes visually dense.
 
 ### 5.3 ClinicDrawer — the signature (ledger entry)
 

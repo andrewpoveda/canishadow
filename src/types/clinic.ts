@@ -2,6 +2,8 @@
 // MIGRATION.md wins on schema over PRM.md §8.1 (which predates the 4-state
 // `call_back` status, the embedded `providers` jsonb, and the `verified` boolean).
 
+import type { UsStateCode } from "@/lib/us-states";
+
 export const CLINIC_STATUS = {
   unknown: "unknown",
   verifiedYes: "verified_yes",
@@ -24,7 +26,7 @@ export interface Clinic {
   name: string;
   address: string;
   city: string;
-  state: "NJ" | "NY";
+  state: UsStateCode;
   zip: string;
   lat: number | null;
   lng: number | null;
@@ -55,6 +57,8 @@ export interface ContactLog {
   notes: string | null;
   logged_by: string | null;
   contact_email: string | null;
+  /** Client-generated idempotency key; null only for legacy ledger rows. */
+  submission_key: string | null;
 }
 
 /** Insert payloads — derived from the row types so schema drift is a compile error. */

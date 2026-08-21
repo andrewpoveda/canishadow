@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "tsx --test src/lib/*.test.ts src/lib/search/*.test.ts",
+    "test:search": "tsx --test src/lib/search/*.test.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
     "seed:nppes": "tsx scripts/seed-nppes.ts"
   },
