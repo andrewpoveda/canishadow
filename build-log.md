@@ -56,9 +56,6 @@ results for Pediatrics, preserved NY call-form fields, immediate deep-link selec
 selected pin visibly above the mobile drawer with no console warnings/errors. Valid NYC Census
 geocoding matched, malformed input returned 400, and invalid search state input returned 400.
 PostHog initialization is now guarded against React development double-effects.
-Preview browser QA also caught and fixed a late NPPES phone-state handoff: if a consolidated
-result's phone arrives after the card's first render, the call form now backfills it without
-overwriting anything the visitor has typed.
 The connected Vercel Git integration produced a green protected preview from branch
 `codex/nationwide-map-search`; live preview checks returned 200 for the homepage and both
 search requests, with 50/50 exact matches for NYC Family Medicine and Los Angeles Pediatrics
