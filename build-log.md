@@ -56,6 +56,10 @@ results for Pediatrics, preserved NY call-form fields, immediate deep-link selec
 selected pin visibly above the mobile drawer with no console warnings/errors. Valid NYC Census
 geocoding matched, malformed input returned 400, and invalid search state input returned 400.
 PostHog initialization is now guarded against React development double-effects.
+The connected Vercel Git integration produced a green protected preview from branch
+`codex/nationwide-map-search`; live preview checks returned 200 for the homepage and both
+search requests, with 50/50 exact matches for NYC Family Medicine and Los Angeles Pediatrics
+and no Vercel runtime errors.
 Read-only production data audit found 12 clinic rows and one pre-existing exact
 `(address, zip)` duplicate pair, confirming the intended composite unique index is not live.
 That pair needs an explicit reviewed merge before adding the DB uniqueness constraint; the
