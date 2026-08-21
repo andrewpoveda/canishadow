@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { track } from "@/lib/analytics";
@@ -81,6 +81,16 @@ export default function SearchLogForm({
   const [savedId, setSavedId] = useState<string | null>(null);
   const [createdClinic, setCreatedClinic] = useState(false);
   const submissionKey = useRef<string | null>(null);
+
+  // NPPES results can finish consolidating a location's phone after the card's
+  // first render. Preserve anything the visitor has typed, but backfill the
+  // registry phone when the field is still empty.
+  useEffect(() => {
+    if (!result.phone) return;
+    setForm((current) =>
+      current.phone ? current : { ...current, phone: result.phone ?? "" },
+    );
+  }, [result.phone]);
 
   const set =
     <K extends keyof SearchLogFormState>(k: K) =>
