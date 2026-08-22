@@ -4,6 +4,26 @@ Reverse-chronological record of what was actually built, session by session. New
 
 <!-- Claude Code: append a new entry above this line at the end of every session. Format: date, one-line summary, then bullets for specifics (what shipped, what broke, what changed from plan, and why). -->
 
+## 2026-08-22 — Release nationwide map and search to production
+
+Merged PR #1 into `main` and confirmed Vercel automatically promoted merge commit
+`de2f5d847aa4debca5061a02421c2c8f5ad950eb` to `canishadow.com`. The production build is
+ready with no alias errors, and Vercel reported no runtime error clusters after release.
+
+**Live verification:** the public NYC Family Medicine search returned 50 results and all 50
+displayed `NEW YORK, NY`; Los Angeles Pediatrics returned 50 results and all 50 displayed
+`LOS ANGELES, CA`. Real browser input zoomed the production Leaflet map from level 11 out to
+level 3, confirming the old NJ/NYC boundary is gone. An existing production clinic deep link
+opened its selected drawer correctly, and the browser console remained clean. Production
+requests observed during the check returned only 200/304 statuses.
+
+**Database/cleanup:** confirmed the live project still has 12 clinics and 6 contact logs.
+The temporary NYC clinic and call created for the controlled preview E2E remain fully removed
+(zero rows for the exact QA address and submission key). Both production migrations remain
+applied. Supabase reports only the two intentional anonymous/signed-in security-definer RPC
+warnings plus the informational unused status-index notice; no schema change was made during
+this final release check.
+
 ## 2026-08-21 — Unblock nationwide map navigation and rebuild NPPES city search
 
 Expanded the product from an NJ/NY-only interaction model to nationwide navigation,
