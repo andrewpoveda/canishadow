@@ -59,15 +59,20 @@ PostHog initialization is now guarded against React development double-effects.
 The connected Vercel Git integration produced a green protected preview from branch
 `codex/nationwide-map-search`; live preview checks returned 200 for the homepage and both
 search requests, with 50/50 exact matches for NYC Family Medicine and Los Angeles Pediatrics
-and no Vercel runtime errors.
+and no Vercel runtime errors. A controlled preview browser submission then exercised the
+complete NYC path: NPPES result → populated call form → Census geocode → atomic Supabase
+clinic/contact-log write → success state → zoom-13 map deep link → selected clinic drawer and
+contact history. The created row retained its NPI, phone, coordinates, callback status,
+unverified flag, source, idempotency key, caller, and notes; the browser console stayed clean.
+The temporary clinic and log were deleted by their exact IDs afterward, returning production
+to its baseline of 12 clinics and 6 logs with zero matching QA rows remaining.
 Read-only production data audit found 12 clinic rows and one pre-existing exact
 `(address, zip)` duplicate pair, confirming the intended composite unique index is not live.
 That pair needs an explicit reviewed merge before adding the DB uniqueness constraint; the
 RPC's advisory lock prevents new canonical duplicates without modifying the existing pair.
 
-**Known production follow-ups:** no browser write QA was performed against production before
-deployment to avoid polluting active data. The database linter now reports only the two
-expected warnings for the intentionally anonymous `log_clinic_call` security-definer RPC;
+**Known production follow-ups:** the database linter reports only the two expected warnings
+for the intentionally anonymous `log_clinic_call` security-definer RPC;
 its inputs are bounded, its search path is locked, and execute access is limited to `anon`
 and `authenticated`. Tighter legacy table policies should follow after every deployed client
 uses the RPC. Marker clustering or viewport aggregation should be added before a future bulk
