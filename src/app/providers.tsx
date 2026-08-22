@@ -16,7 +16,7 @@ import { useEffect } from "react";
 export function PostHogProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
-    if (!key) return;
+    if (!key || posthog.__loaded) return;
 
     posthog.init(key, {
       api_host: "/ingest",

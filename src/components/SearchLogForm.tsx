@@ -1,28 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { todayISODate } from "@/lib/date";
 import { track } from "@/lib/analytics";
+import { normalizeClinicAddress } from "@/lib/clinic-address";
+import { logClinicCall, type CallOutcome } from "@/lib/log-clinic-call";
+import { US_STATES, type UsStateCode } from "@/lib/us-states";
 import type { ClinicSearchResult } from "@/lib/search/types";
-import type { ClinicInsert, ClinicStatus } from "@/types/clinic";
+import type { Clinic } from "@/types/clinic";
 
 // Add a searched clinic to the map + log the call (MIGRATION.md §3/§4). Prefills from the
 // NPPES ClinicSearchResult (structured address, so geocoding has real data). base44 → Supabase,
 // geocodeAddress edge fn → /api/geocode. New crowdsourced rows land verified = false (§0.1).
-type Outcome = "yes" | "no" | "call_back";
-
-const OUTCOMES: { key: Outcome; label: string }[] = [
+const OUTCOMES: { key: CallOutcome; label: string }[] = [
   { key: "yes", label: "Said yes" },
   { key: "no", label: "Said no" },
   { key: "call_back", label: "Call back later" },
 ];
-const STATUS_FOR: Record<Outcome, ClinicStatus> = {
-  yes: "verified_yes",
-  no: "verified_no",
-  call_back: "call_back",
-};
 
 interface GeocodeResponse {
   matched: boolean;
@@ -30,17 +25,51 @@ interface GeocodeResponse {
   lng?: number;
 }
 
+interface SearchLogFormState {
+  name: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: UsStateCode;
+  zip: string;
+  outcome: CallOutcome;
+  yourName: string;
+  contactEmail: string;
+  notes: string;
+}
+
+async function findExistingClinic(address: string, zip: string) {
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("clinics")
+      .select("*")
+      .eq("zip", zip)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) return { clinic: null, failed: true };
+    const page = (data as Clinic[] | null) ?? [];
+    const clinic = page.find(
+      (candidate) => normalizeClinicAddress(candidate.address) === address,
+    );
+    if (clinic) return { clinic, failed: false };
+    if (page.length < pageSize) return { clinic: null, failed: false };
+  }
+}
+
 export default function SearchLogForm({
   result,
 }: {
   result: ClinicSearchResult;
 }) {
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<SearchLogFormState>({
     name: result.name,
     phone: result.phone || "",
     address: result.address || "",
     city: result.city || "",
-    state: result.state === "NY" ? "NY" : "NJ",
+    state: result.state || "NJ",
     zip: result.zip || "",
     outcome: "yes",
     yourName: "",
@@ -50,15 +79,20 @@ export default function SearchLogForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [createdClinic, setCreatedClinic] = useState(false);
+  const submissionKey = useRef<string | null>(null);
 
   const set =
-    (k: keyof typeof form) =>
+    <K extends keyof SearchLogFormState>(k: K) =>
     (
       e: React.ChangeEvent<
         HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
       >,
     ) =>
-      setForm({ ...form, [k]: e.target.value });
+      setForm((current) => ({
+        ...current,
+        [k]: e.target.value as SearchLogFormState[K],
+      }));
 
   const inputClass =
     "w-full rounded-pill border border-line bg-paper px-4 py-2.5 text-[13px] text-ink placeholder:text-ink-3 focus:outline-none focus:ring-2 focus:ring-ink";
@@ -68,89 +102,123 @@ export default function SearchLogForm({
     setError(null);
     setSaving(true);
 
-    let geo: GeocodeResponse;
-    try {
-      const res = await fetch("/api/geocode", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          address: form.address,
-          city: form.city,
-          state: form.state,
-          zip: form.zip,
-        }),
-      });
-      geo = (await res.json()) as GeocodeResponse;
-    } catch {
-      setSaving(false);
-      setError("Couldn't reach the geocoder — try again.");
-      return;
-    }
-
-    if (!geo.matched || geo.lat == null || geo.lng == null) {
-      setSaving(false);
-      setError("Couldn't locate that address — check the street, city and zip.");
-      return;
-    }
-
-    const outcome = form.outcome as Outcome;
-    const insert: ClinicInsert = {
-      name: form.name,
-      address: form.address,
-      city: form.city,
-      state: form.state === "NY" ? "NY" : "NJ",
-      zip: form.zip,
-      lat: geo.lat,
-      lng: geo.lng,
-      phone: form.phone || null,
-      status: STATUS_FOR[outcome],
-      provider_count: 1,
-      specialties: result.specialties ?? [],
-      providers: [],
-      contact_email: form.contactEmail || null,
-      npi: result.npi ?? null,
-      verified: false, // crowdsourced — pending AP MED team review (§0.1)
-      last_verified: todayISODate(),
-      verified_by: form.yourName || "student",
-      notes: null,
-      source: "student_search",
+    const normalized = {
+      name: form.name.replace(/\s+/g, " ").trim(),
+      phone: form.phone.trim(),
+      enteredAddress: form.address.replace(/\s+/g, " ").trim(),
+      address: normalizeClinicAddress(form.address),
+      city: form.city.replace(/\s+/g, " ").trim(),
+      zip: form.zip.replace(/\D/g, "").slice(0, 5),
+      yourName: form.yourName.replace(/\s+/g, " ").trim(),
+      contactEmail: form.contactEmail.trim(),
+      notes: form.notes.trim(),
     };
+    if (!normalized.name || !normalized.address || !normalized.city) {
+      setSaving(false);
+      setError("Clinic name, street address, and city are required.");
+      return;
+    }
+    if (normalized.zip.length !== 5) {
+      setSaving(false);
+      setError("Enter a valid 5-digit ZIP code.");
+      return;
+    }
 
-    const { data: clinic, error: insertError } = await supabase
-      .from("clinics")
-      .insert(insert)
-      .select()
-      .single();
-
-    if (insertError || !clinic) {
+    const outcome = form.outcome;
+    const existing = await findExistingClinic(normalized.address, normalized.zip);
+    if (existing.failed) {
       setSaving(false);
       setError("Couldn't save the clinic. Try again.");
       return;
     }
 
-    await supabase.from("contact_logs").insert({
-      clinic_id: clinic.id,
-      outcome,
-      notes: form.notes || null,
-      logged_by: form.yourName || null,
-      contact_email: form.contactEmail || null,
-    });
+    let clinic = existing.clinic;
+    let geocoded: { lat: number; lng: number } | null = null;
 
-    track("clinic_added", {
-      outcome,
-      state: insert.state,
-      has_npi: Boolean(result.npi),
-    });
+    if (!clinic || clinic.lat == null || clinic.lng == null) {
+      let geo: GeocodeResponse;
+      try {
+        const res = await fetch("/api/geocode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            address: normalized.enteredAddress,
+            city: normalized.city,
+            state: form.state,
+            zip: normalized.zip,
+          }),
+        });
+        if (!res.ok) throw new Error("geocoder unavailable");
+        geo = (await res.json()) as GeocodeResponse;
+      } catch {
+        setSaving(false);
+        setError("Couldn't reach the geocoder — try again.");
+        return;
+      }
+
+      if (!geo.matched || geo.lat == null || geo.lng == null) {
+        setSaving(false);
+        setError("Couldn't locate that address — check the street, city and zip.");
+        return;
+      }
+      geocoded = { lat: geo.lat, lng: geo.lng };
+    }
+
+    submissionKey.current ??= crypto.randomUUID();
+    let saved;
+    try {
+      saved = await logClinicCall({
+        submissionKey: submissionKey.current,
+        clinicId: clinic?.id ?? null,
+        outcome,
+        loggedBy: normalized.yourName,
+        contactEmail: normalized.contactEmail,
+        notes: normalized.notes,
+        name: normalized.name,
+        address: normalized.address,
+        city: normalized.city,
+        state: form.state,
+        zip: normalized.zip,
+        lat: geocoded?.lat ?? clinic?.lat ?? undefined,
+        lng: geocoded?.lng ?? clinic?.lng ?? undefined,
+        phone: normalized.phone,
+        providerCount: result.providerCount ?? 1,
+        specialties: result.specialties ?? [],
+        npi: result.npi ?? undefined,
+      });
+    } catch {
+      setSaving(false);
+      setError("Couldn't save the clinic and call. Try again.");
+      return;
+    }
+
+    if (saved.created) {
+      track("clinic_added", {
+        outcome,
+        state: form.state,
+        has_npi: Boolean(result.npi),
+      });
+    } else {
+      track("call_logged", {
+        clinic_id: saved.clinic.id,
+        outcome,
+        resulting_status: saved.clinic.status,
+        has_provider: false,
+      });
+    }
 
     setSaving(false);
-    setSavedId(clinic.id);
+    setCreatedClinic(saved.created);
+    setSavedId(saved.clinic.id);
   };
 
   if (savedId) {
     return (
       <div className="mt-3 rounded-sheet bg-verified-tint p-4">
         <p className="text-[13px] font-medium text-verified">
-          Logged — the clinic is now on the map.
+          {createdClinic
+            ? "Logged — the clinic is now on the map."
+            : "Logged — the existing clinic was updated."}
         </p>
         <Link
           href={`/?clinic=${savedId}`}
@@ -183,12 +251,14 @@ export default function SearchLogForm({
         onChange={set("name")}
         placeholder="Clinic name"
         required
+        maxLength={300}
         className={inputClass}
       />
       <input
         value={form.phone}
         onChange={set("phone")}
         placeholder="Phone"
+        maxLength={50}
         className={inputClass}
       />
       <input
@@ -196,6 +266,7 @@ export default function SearchLogForm({
         onChange={set("address")}
         placeholder="Street address"
         required
+        maxLength={300}
         className={inputClass}
       />
       <div className="flex gap-2">
@@ -204,21 +275,29 @@ export default function SearchLogForm({
           onChange={set("city")}
           placeholder="City"
           required
+          maxLength={150}
           className={inputClass}
         />
         <select
           value={form.state}
           onChange={set("state")}
+          aria-label="State"
+          autoComplete="address-level1"
           className="rounded-pill border border-line bg-paper px-3 text-[13px] text-ink"
         >
-          <option value="NJ">NJ</option>
-          <option value="NY">NY</option>
+          {US_STATES.map(({ code, name }) => (
+            <option key={code} value={code}>
+              {code} — {name}
+            </option>
+          ))}
         </select>
         <input
           value={form.zip}
           onChange={set("zip")}
           placeholder="Zip"
           required
+          inputMode="numeric"
+          pattern="[0-9]{5}(-[0-9]{4})?"
           className={`${inputClass} max-w-[100px]`}
         />
       </div>
@@ -226,6 +305,7 @@ export default function SearchLogForm({
         value={form.yourName}
         onChange={set("yourName")}
         placeholder="Your name"
+        maxLength={200}
         className={inputClass}
       />
       <input
@@ -233,6 +313,7 @@ export default function SearchLogForm({
         onChange={set("contactEmail")}
         type="email"
         placeholder="Clinic contact email — optional"
+        maxLength={320}
         className={inputClass}
       />
       <textarea
@@ -240,6 +321,7 @@ export default function SearchLogForm({
         onChange={set("notes")}
         placeholder="Notes"
         rows={2}
+        maxLength={2000}
         className="w-full rounded-sheet border border-line bg-paper px-4 py-2.5 text-[13px] text-ink placeholder:text-ink-3 focus:outline-none focus:ring-2 focus:ring-ink"
       />
       {error && <p className="text-[13px] text-declined">{error}</p>}

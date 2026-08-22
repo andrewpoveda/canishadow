@@ -4,6 +4,80 @@ Reverse-chronological record of what was actually built, session by session. New
 
 <!-- Claude Code: append a new entry above this line at the end of every session. Format: date, one-line summary, then bullets for specifics (what shipped, what broke, what changed from plan, and why). -->
 
+## 2026-08-21 — Unblock nationwide map navigation and rebuild NPPES city search
+
+Expanded the product from an NJ/NY-only interaction model to nationwide navigation,
+registry search, and call-log form support, with NYC-specific regression coverage.
+
+**Map:** removed Leaflet's `minZoom=9` and hard NJ/NYC `maxBounds`, while keeping the
+existing NJ/NYC opening view. Selecting a pin or opening `/?clinic=<id>` now recenters at
+neighborhood zoom (with reduced-motion support), including clinics outside the opening
+viewport. On phones, the selected pin is positioned in the visible strip above the 80%-height
+drawer instead of being hidden behind it. Deep links select from server data immediately and
+refresh safely on mount. Server and client map reads now paginate stable 1,000-row Supabase
+ranges until the complete ledger is loaded instead of silently truncating nationwide growth.
+
+**NPPES search:** replaced the broad first-50 query with targeted Family Medicine,
+Internal Medicine, and Pediatrics requests across both NPI-1 and NPI-2. The adapter now
+validates upstream JSON, uses exact city/state practice locations (including matching
+secondary `practiceLocations`), drops inactive/irrelevant records, groups normalized
+`(address, zip)` locations, prefers NPI-2 organization names, retains provider counts,
+and caps ranked results at 50. Added timeouts, one retry for transient failures, a bounded
+15-minute cache, partial-provider failure handling, strict request validation, and clear
+502 errors instead of disguising registry outages as zero results. `NYC`, `New York City`,
+and `Manhattan` normalize to NPPES's `New York`; Washington DC aliases also normalize.
+
+**Nationwide UI/schema contract:** added a shared state/territory allowlist used by search,
+geocoding, types, and both state selectors. Removed the form bug that rewrote every state
+except NY to NJ. Added
+`supabase/migrations/202608200001_expand_clinic_states.sql` and applied it to the live,
+separate CanIShadow Supabase project before deploying the nationwide logging UI.
+
+**Write-path hardening:** repeated canonically equivalent `(address, zip)` submissions now
+reuse the oldest existing clinic instead of always inserting (case, punctuation, common
+street suffixes, floors, and suites normalize through one shared helper). Both call forms now
+use one row-locking Supabase RPC that creates/reuses the clinic, derives its current status,
+and appends the ledger entry in one transaction. A client-generated `submission_key` makes a
+lost-response retry return the original result instead of adding a second call. Concurrent
+clinic creation is serialized by canonical `(address, zip)`, and anonymous calls cannot
+replace a team-verified clinic's trusted status/date/byline. Geocoding validates request
+size/state/ZIP, times out, rejects invalid coordinates and mismatched returned state/ZIP,
+and only then allows a pin insert. Applied
+`supabase/migrations/202608210001_atomic_call_logging.sql` before deploying the new client.
+Added `supabase/tests/atomic_call_logging.sql`, a rollback-only gate covering creation,
+ledger insertion, retry idempotency, and protection of team-verified fields. Both migrations
+were first rehearsed inside a rolled-back transaction, then applied and verified on the live
+Postgres 17 project; the rollback-only RPC test passed after the persistent apply.
+
+**QA:** NPPES and map-pagination tests pass 6/6; TypeScript, ESLint, and the production Next
+build are clean. Browser QA at desktop and 390×844 confirmed unrestricted zoom from level 11
+to level 7, 50/50 exact New York results for `NYC` Family Medicine, 50/50 exact Los Angeles
+results for Pediatrics, preserved NY call-form fields, immediate deep-link selection, and a
+selected pin visibly above the mobile drawer with no console warnings/errors. Valid NYC Census
+geocoding matched, malformed input returned 400, and invalid search state input returned 400.
+PostHog initialization is now guarded against React development double-effects.
+The connected Vercel Git integration produced a green protected preview from branch
+`codex/nationwide-map-search`; live preview checks returned 200 for the homepage and both
+search requests, with 50/50 exact matches for NYC Family Medicine and Los Angeles Pediatrics
+and no Vercel runtime errors. A controlled preview browser submission then exercised the
+complete NYC path: NPPES result → populated call form → Census geocode → atomic Supabase
+clinic/contact-log write → success state → zoom-13 map deep link → selected clinic drawer and
+contact history. The created row retained its NPI, phone, coordinates, callback status,
+unverified flag, source, idempotency key, caller, and notes; the browser console stayed clean.
+The temporary clinic and log were deleted by their exact IDs afterward, returning production
+to its baseline of 12 clinics and 6 logs with zero matching QA rows remaining.
+Read-only production data audit found 12 clinic rows and one pre-existing exact
+`(address, zip)` duplicate pair, confirming the intended composite unique index is not live.
+That pair needs an explicit reviewed merge before adding the DB uniqueness constraint; the
+RPC's advisory lock prevents new canonical duplicates without modifying the existing pair.
+
+**Known production follow-ups:** the database linter reports only the two expected warnings
+for the intentionally anonymous `log_clinic_call` security-definer RPC;
+its inputs are bounded, its search path is locked, and execute access is limited to `anon`
+and `authenticated`. Tighter legacy table policies should follow after every deployed client
+uses the RPC. Marker clustering or viewport aggregation should be added before a future bulk
+seed makes the full nationwide ledger visually dense.
+
 ## 2026-08-09 — Wire PostHog analytics properly + event capture on the write path
 
 `posthog-js` (1.414.0) was already a dependency but never initialized. Wired it into the App

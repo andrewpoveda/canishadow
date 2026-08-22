@@ -49,9 +49,15 @@ SUPABASE_SERVICE_ROLE_KEY=   # seed scripts ONLY — never NEXT_PUBLIC, never im
 > build-log.md 2026-07-24.** The app shipped with **two tables** (`clinics` + `contact_logs`),
 > a **4-state** status (`unknown`/`verified_yes`/`verified_no`/`call_back`), an embedded
 > `providers` jsonb array, a separate `verified` boolean (trust axis, distinct from colour —
-> §0.1), and **public INSERT/UPDATE** RLS (the crowdsourced flywheel). The single-table,
+> §0.1), and anonymous crowdsourced logging through an atomic, idempotent database RPC
+> (legacy public INSERT/UPDATE policies remain temporarily for rollout compatibility). The single-table,
 > 3-state, read-only-RLS design below is the original pre-build plan. The `(address, zip)` dedup
-> key and the NPPES/Census seed pipeline notes further down remain accurate.
+> key and the NPPES/Census seed pipeline notes further down remain accurate. The application now
+> supports nationwide search and call logging: `state` is a validated U.S. state/territory code.
+> Production logging becomes nationwide after applying both checked-in migrations: the first
+> expands accepted states and the second installs the transactional call-log RPC and retry key.
+> Until then, the live database still accepts only NJ/NY and the new client must not deploy.
+> The original seed scope below still describes only the preloaded NJ/NYC dataset.
 
 One table. Pins are **locations**, not individual providers.
 

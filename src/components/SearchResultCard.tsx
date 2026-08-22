@@ -21,7 +21,10 @@ export default function SearchResultCard({
     <div className="rounded-sheet border border-line bg-paper p-4">
       {result.npi && (
         <p className="font-mono text-[11px] uppercase tracking-[0.06em] text-ink-3">
-          NPI {result.npi}
+          {result.enumerationType === "NPI-2"
+            ? "Organization"
+            : "Individual provider"}{" "}
+          · NPI {result.npi}
         </p>
       )}
       <h3 className="mt-1 text-[15px] font-semibold text-ink">{result.name}</h3>
@@ -33,6 +36,11 @@ export default function SearchResultCard({
       {specialties.length > 0 && (
         <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.06em] text-ink-3">
           {specialties.slice(0, 3).join(" · ")}
+        </p>
+      )}
+      {(result.providerCount ?? 0) > 1 && (
+        <p className="mt-1 text-[13px] leading-[18px] text-ink-2">
+          {result.providerCount} registered providers at this location
         </p>
       )}
       {result.phone && (
