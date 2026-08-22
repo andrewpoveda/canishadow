@@ -1,11 +1,11 @@
-# CanIShadow — CLAUDE.md
+# CanIShadow — AGENTS.md
 
 Open-source nationwide map of clinics' shadowing status. It opens over NJ/NYC, where the
 project started, while map navigation and NPPES clinic search work across the United States.
 Built by Andrew Poveda (AP MED), separate repo/brand.
 
 ## Every session start
-Read `CLAUDE.md` (this file), `MIGRATION.md`, `SPEC.md`, `PRM.md`, and `build-log.md` before doing anything. Also skim `reference-base44/` — the exported base44 MVP retained as a read-only porting reference.
+Read `AGENTS.md` (this file), `MIGRATION.md`, `SPEC.md`, `PRM.md`, and `build-log.md` before doing anything. Also skim `reference-base44/` — the exported base44 MVP retained as a read-only porting reference.
 
 The base44 MVP has been **rebuilt on Next.js/Supabase.** `MIGRATION.md` is the authoritative rebuild target: **it wins on stack, schema, and architecture wherever it conflicts with SPEC.md or this file** (SPEC.md predates the build). `build-log.md` is the source of truth for what's actually been built — SPEC.md is the *plan*, build-log.md is the *reality*; where they disagree, build-log.md wins.
 
