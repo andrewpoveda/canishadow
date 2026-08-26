@@ -4,6 +4,15 @@ Reverse-chronological record of what was actually built, session by session. New
 
 <!-- Claude Code: append a new entry above this line at the end of every session. Format: date, one-line summary, then bullets for specifics (what shipped, what broke, what changed from plan, and why). -->
 
+## 2026-08-22 — Track shared coding-agent instructions
+
+Added the previously local-only root `AGENTS.md` to version control so Codex and other
+compatible coding agents receive the same project rules on every machine. Updated both
+`AGENTS.md` and `CLAUDE.md` to describe the shipped nationwide map/search scope, the completed
+base44 rebuild, and the correct split between live single-address Census geocoding and future
+batch seed geocoding. Documentation only; no application, database, or deployment behavior
+changed.
+
 ## 2026-08-22 — Release nationwide map and search to production
 
 Merged PR #1 into `main` and confirmed Vercel automatically promoted merge commit
