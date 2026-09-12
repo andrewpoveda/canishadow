@@ -18,7 +18,7 @@ ways that matter. Decide these first — Claude Code should confirm each with yo
 
 | # | SPEC.md said | base44 actually built | Recommendation for rebuild |
 |---|---|---|---|
-| 1. Map | Mapbox via `react-map-gl` (needs paid token; geocoding TOS headaches) | **Leaflet + free CARTO tiles** (`react-leaflet`) | **Keep Leaflet + CARTO.** Free, no token, no TOS issue, already proven in the export. Drop Mapbox from SPEC. |
+| 1. Map | Mapbox via `react-map-gl` (needs paid token; geocoding TOS headaches) | **Leaflet + OpenStreetMap tiles** (`react-leaflet`) | **Keep Leaflet, but use OpenStreetMap tiles.** CARTO began requiring API keys in August 2026; direct OpenStreetMap tiles keep the current low-traffic app keyless. Drop Mapbox from SPEC. |
 | 2. Data model | One `clinics` table, 3-state status, pins = locations only | Added `call_back` status, embedded `providers[]`, `contact_email`, **a second `ContactLog` table**, per-provider yes/no | **Keep the richer base44 model.** The provider-level detail + contact history is the demo. Use both tables below. |
 | 3. Writes / RLS | **No public INSERT** — updates via dashboard, submissions post-event | Public crowdsourced logging — any student logs a call → pin drops/updates | **This is the real call (see §4).** The crowdsourced loop is what won 5th place. Recommend enabling public writes with light guardrails, not locking it down. |
 | 4. Clinic search | (not specified — SPEC seeds from NPPES) | **Tavily** web search (paid API / hackathon credits, inconsistent data) | **Drop Tavily as the default. Use NPPES** — free, no key, authoritative federal provider registry, same source we seed from. Tavily demoted to an optional feature flag (§4). App runs on $0 with no search key. |
@@ -370,7 +370,7 @@ SUPABASE_SERVICE_ROLE_KEY=     # seed scripts ONLY — never NEXT_PUBLIC, never 
 # TAVILY_API_KEY=              # only needed when SEARCH_PROVIDER=tavily
 ```
 
-**Supabase keys are the only required secrets.** No Mapbox token (Leaflet + CARTO are free),
+**Supabase keys are the only required secrets.** No Mapbox token (Leaflet + OpenStreetMap tiles are keyless),
 no geocoder key (Census is free), no search key (NPPES is free). The app ships on $0.
 
 ---
