@@ -27,10 +27,10 @@ The base44 MVP has been **rebuilt on Next.js/Supabase.** `MIGRATION.md` is the a
 - Any route/page reading Supabase needs `export const dynamic = 'force-dynamic'`
 
 ## Stack
-Next.js App Router + TS + Tailwind (design tokens from PRM.md §3.1 / `reference-base44/tailwind.config.js`) · Supabase (new project, separate from AP MED's) · **Leaflet + free CARTO tiles via `react-leaflet` (NOT Mapbox — MIGRATION.md §0)** · Vercel
+Next.js App Router + TS + Tailwind (design tokens from PRM.md §3.1 / `reference-base44/tailwind.config.js`) · Supabase (new project, separate from AP MED's) · **Leaflet + OpenStreetMap tiles via `react-leaflet` (NOT Mapbox — MIGRATION.md §0)** · Vercel
 
 ## Env vars
-Supabase keys are the ONLY required secrets — the app ships on $0 (NPPES, US Census, and CARTO are all free/no-key).
+Supabase keys are the ONLY required secrets — the app ships on $0 (NPPES, US Census, and OpenStreetMap tiles are all free/no-key).
 ```
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
