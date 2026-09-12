@@ -48,8 +48,8 @@ function SelectedClinicController({ clinic }: { clinic: Clinic | null }) {
   return null;
 }
 
-// Ported from reference-base44/src/components/canishadow/MapView.jsx — Leaflet + free CARTO
-// tiles (MIGRATION.md §0, no Mapbox). Circle layers keep hundreds of pins smooth on a phone.
+// Ported from reference-base44/src/components/canishadow/MapView.jsx. Leaflet uses
+// OpenStreetMap tiles with no client API key. Circle layers keep hundreds of pins smooth on a phone.
 export default function MapView({
   clinics,
   selectedClinic,
@@ -74,8 +74,9 @@ export default function MapView({
     >
       <SelectedClinicController clinic={selectedClinic} />
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        maxZoom={19}
       />
       {ordered.map((c) => {
         if (c.lat == null || c.lng == null) return null;
