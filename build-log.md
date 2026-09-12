@@ -2,6 +2,16 @@
 
 Reverse-chronological record of what was actually built, session by session. Newest entry on top. This is the source of truth over SPEC.md when the two disagree — SPEC.md is the plan, this is what really happened.
 
+## 2026-09-12 — Remove CARTO API-key watermark
+
+CARTO began requiring API keys for its previously keyless raster basemaps in late August 2026,
+causing repeated "API KEY REQUIRED" text to appear inside the production map tiles without any
+application change. Replaced the CARTO Positron tile endpoint with Leaflet's keyless
+OpenStreetMap tile endpoint, retained required OpenStreetMap attribution, and capped the tile
+layer at OpenStreetMap's supported zoom level 19. No clinic, search, geocoding, or database
+behavior changed. Updated the agent and migration documentation so it no longer promises
+keyless CARTO service.
+
 <!-- Claude Code: append a new entry above this line at the end of every session. Format: date, one-line summary, then bullets for specifics (what shipped, what broke, what changed from plan, and why). -->
 
 ## 2026-08-22 — Track shared coding-agent instructions
