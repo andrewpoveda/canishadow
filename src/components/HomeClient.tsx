@@ -7,6 +7,7 @@ import FilterBar, { type FilterKey } from "@/components/FilterBar";
 import Header from "@/components/Header";
 import Legend from "@/components/Legend";
 import { fetchMappableClinics } from "@/lib/fetch-clinics";
+import { captureOperationalError } from "@/lib/monitoring";
 import { effectiveStatus } from "@/lib/status";
 import type { Clinic } from "@/types/clinic";
 
@@ -55,7 +56,11 @@ export default function HomeClient({
           }
         }
       })
-      .catch(() => {
+      .catch((error) => {
+        captureOperationalError(error, {
+          operation: "refresh_mappable_clinics",
+          message: "Unable to refresh mappable clinics",
+        });
         // Keep the server-rendered snapshot when background revalidation fails.
       });
     return () => {

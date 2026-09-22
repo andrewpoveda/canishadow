@@ -10,14 +10,16 @@
 
 ## App (rebuilt on Next.js/Supabase — see build-log.md 2026-07-24)
 
-- `src/app/` — `layout.tsx` (fonts + metadata, wraps app in `PostHogProvider`), `providers.tsx` (client PostHog init — no-op without `NEXT_PUBLIC_POSTHOG_KEY`), `globals.css` (Tailwind v4 `@theme` tokens — the only place colors are defined), `page.tsx` (server, `force-dynamic`, fetches clinics → `HomeClient`), `search/page.tsx` (nationwide NPPES search UI), `api/search/route.ts` + `api/geocode/route.ts`
-- `src/components/` — `HomeClient` (orchestrator), `MapView` (Leaflet + CARTO), `ClinicDrawer`, `ProviderList`, `ContactHistory`, `LogCallForm` (status-derivation brain), `SearchResultCard`, `SearchLogForm`, `FilterBar`, `Legend`, `Header`, `StatusBadge`
-- `src/lib/` — `supabase.ts` (anon client), `log-clinic-call.ts` (typed atomic call-log RPC client), `fetch-clinics.ts` (paginated full-ledger map loading + test), `status.ts`, `date.ts`, `clinic-address.ts` (shared `(address, zip)` normalization), `us-states.ts` (U.S. state/territory allowlist), `search/` (`types.ts`, `validation.ts`, `nppes.ts` default + focused tests, `tavily.ts` optional, `index.ts`)
-- `src/types/clinic.ts` — domain types mirroring the MIGRATION §1 schema (`Clinic`, `ContactLog`, `Provider`, `ClinicInsert`, status consts)
+- `src/app/` — `layout.tsx` (fonts + metadata/trace propagation, wraps app in `PostHogProvider`), `global-error.tsx` (Sentry-reporting App Router fallback), `providers.tsx` (client PostHog init — no-op without `NEXT_PUBLIC_POSTHOG_KEY`), `globals.css` (Tailwind v4 `@theme` tokens — the only place colors are defined), `page.tsx` (server, `force-dynamic`, fetches clinics → `HomeClient`), `search/page.tsx` (nationwide NPPES search UI), `api/search/route.ts` + `api/geocode/route.ts`
+- `src/instrumentation.ts` + `src/instrumentation-client.ts` — initialize Sentry request/error monitoring for Node.js, edge, and browser contexts
+- `src/components/` — `HomeClient` (orchestrator), `MapView` (Leaflet + OpenStreetMap), `ClinicDrawer`, `ProviderList`, `ContactHistory` (NPI target snapshots and separate contact reports), `LogCallForm`, `SearchResultCard`, `SearchLogForm`, `ReportContactForm`, `FilterBar`, `Legend`, `Header`, `StatusBadge`
+- `src/lib/` — `supabase.ts` (anon client), `log-clinic-call.ts` and `call-log-rpc.ts` (typed atomic call-log RPC), `report-clinic-contact.ts` and `contact-report-rpc.ts` (separate wrong-number/closed-practice reporting), `contact-history.ts` (target identity shown in history), `monitoring.ts`, `fetch-clinics.ts` (paginated full-ledger map loading + test), `status.ts`, `date.ts`, `clinic-address.ts` (suite-preserving `(address, zip)` normalization + test), `us-states.ts`, `search/` (`types.ts`, `validation.ts`, `nppes.ts` + collision/identity tests, `index.ts`; NPPES is the only live provider)
+- `src/types/clinic.ts` — domain types mirroring the MIGRATION §1 schema (`Clinic`, target-aware `ContactLog`, `ContactReport`, `Provider`, `ClinicInsert`, status consts)
 - `scripts/` — `seed-demo.ts` (8 demo rows, `npm run seed:demo`), `seed-nppes.ts` (documented stub → SPEC.md §Seed)
 - `data/zips.ts` — Essex/Hudson NJ + Manhattan seed zips + taxonomy filters (for the future seed pipeline)
-- `supabase/migrations/` — checked-in production schema migrations; widens `clinics.state`, then installs atomic/idempotent call logging
+- `supabase/migrations/` — three applied migrations; `20260922191944_preserve_nppes_call_target_identity.sql` adds target snapshots, separate reports, and RPC-only contact-log writes
 - `supabase/tests/atomic_call_logging.sql` — rollback-only staging verification for clinic creation, ledger insertion, retry idempotency, and verified-status protection
-- Config: `package.json`, `tsconfig.json`, `next.config.mjs`, `postcss.config.mjs`, `.eslintrc.json`, `.env.local.example`, `.claude/launch.json`
+- `supabase/tests/identity_safe_contact_logging.sql` — rollback-only suite-collision, same-location/different-NPI, and non-shadowing contact-report regression coverage
+- Config: `package.json`, `tsconfig.json`, `next.config.mjs` (PostHog rewrites + Sentry build/tunnel wrapper), `sentry.server.config.ts`, `sentry.edge.config.ts`, `postcss.config.mjs`, `.eslintrc.json`, `.env.local.example`, `.claude/launch.json`
 
 <!-- Claude Code: add a line here whenever a new top-level file, script, or major component is created. -->

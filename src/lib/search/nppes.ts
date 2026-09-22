@@ -7,6 +7,7 @@ import {
   type ClinicSearchInput,
   type ClinicSearchProvider,
   type ClinicSearchResult,
+  type ClinicSearchTarget,
   type NpiEnumerationType,
   type SearchSpecialty,
 } from "./types";
@@ -80,19 +81,12 @@ interface NppesProviderOptions {
   cacheSize?: number;
 }
 
-interface Candidate extends ClinicSearchResult {
-  address: string;
-  city: string;
-  state: NonNullable<ClinicSearchResult["state"]>;
-  zip: string;
-  enumerationType: NpiEnumerationType;
-  groupKey: string;
+interface Candidate extends ClinicSearchTarget {
+  identityKey: string;
 }
 
 interface GroupedResult {
-  result: ClinicSearchResult;
-  hasOrganization: boolean;
-  individualNpis: Set<string>;
+  result: Candidate;
   specialties: Set<string>;
 }
 
@@ -167,6 +161,7 @@ function toCandidates(
 
     const enumerationType = result.enumeration_type || queriedType;
     const npi = result.number == null ? undefined : String(result.number);
+    if (!npi || !/^\d{10}$/.test(npi)) continue;
 
     for (const location of matchingLocations(result, input)) {
       const address = formatAddress(location);
@@ -188,7 +183,16 @@ function toCandidates(
           .filter((value): value is string => Boolean(value)),
         enumerationType,
         providerCount: enumerationType === "NPI-1" ? 1 : undefined,
-        groupKey: `${normalizeClinicAddress(address)}|${zip}`,
+        phoneSource: "NPPES NPI Registry",
+        phoneStatus: "unconfirmed",
+        identityKey: JSON.stringify([
+          enumerationType,
+          npi,
+          normalizeClinicAddress(address),
+          city.toUpperCase(),
+          state,
+          zip,
+        ]),
       });
     }
   }
@@ -200,49 +204,36 @@ function groupCandidates(candidates: Candidate[]) {
   const groups = new Map<string, GroupedResult>();
 
   for (const candidate of candidates) {
-    const existing = groups.get(candidate.groupKey);
+    const existing = groups.get(candidate.identityKey);
     const candidateSpecialties = candidate.specialties || [];
-    const candidateNpi = candidate.npi;
 
     if (!existing) {
-      const individualNpis = new Set<string>();
-      if (candidate.enumerationType === "NPI-1" && candidateNpi) {
-        individualNpis.add(candidateNpi);
-      }
-      const { groupKey: _groupKey, ...result } = candidate;
-      groups.set(candidate.groupKey, {
-        result,
-        hasOrganization: candidate.enumerationType === "NPI-2",
-        individualNpis,
+      groups.set(candidate.identityKey, {
+        result: candidate,
         specialties: new Set(candidateSpecialties),
       });
       continue;
     }
 
+    // Multiple taxonomy queries can return the same NPI at the same practice
+    // location. Only those duplicate observations share metadata or a phone.
     for (const specialty of candidateSpecialties) {
       existing.specialties.add(specialty);
     }
-    if (candidate.enumerationType === "NPI-1" && candidateNpi) {
-      existing.individualNpis.add(candidateNpi);
-    }
-
-    if (candidate.enumerationType === "NPI-2" && !existing.hasOrganization) {
-      existing.result.name = candidate.name;
-      existing.result.npi = candidate.npi;
-      existing.result.enumerationType = "NPI-2";
-      existing.result.phone = candidate.phone || existing.result.phone;
-      existing.hasOrganization = true;
-    } else if (!existing.result.phone && candidate.phone) {
+    if (!existing.result.phone && candidate.phone) {
       existing.result.phone = candidate.phone;
     }
   }
 
   return [...groups.values()]
-    .map((group) => ({
-      ...group.result,
-      specialties: [...group.specialties].sort(),
-      providerCount: Math.max(group.individualNpis.size, 1),
-    }))
+    .map((group) => {
+      const { identityKey: _identityKey, ...result } = group.result;
+      return {
+        result,
+        specialties: [...group.specialties].sort(),
+      };
+    })
+    .map(({ result, specialties }) => ({ ...result, specialties }))
     .sort((a, b) => {
       const organizationRank =
         Number(b.enumerationType === "NPI-2") -

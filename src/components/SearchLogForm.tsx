@@ -6,8 +6,9 @@ import { supabase } from "@/lib/supabase";
 import { track } from "@/lib/analytics";
 import { normalizeClinicAddress } from "@/lib/clinic-address";
 import { logClinicCall, type CallOutcome } from "@/lib/log-clinic-call";
+import { captureOperationalError } from "@/lib/monitoring";
 import { US_STATES, type UsStateCode } from "@/lib/us-states";
-import type { ClinicSearchResult } from "@/lib/search/types";
+import type { ClinicSearchTarget } from "@/lib/search/types";
 import type { Clinic } from "@/types/clinic";
 
 // Add a searched clinic to the map + log the call (MIGRATION.md §3/§4). Prefills from the
@@ -38,18 +39,25 @@ interface SearchLogFormState {
   notes: string;
 }
 
-async function findExistingClinic(address: string, zip: string) {
+async function findExistingClinic(address: string, state: string, zip: string) {
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase
       .from("clinics")
       .select("*")
+      .eq("state", state)
       .eq("zip", zip)
       .order("created_at", { ascending: true })
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
-    if (error) return { clinic: null, failed: true };
+    if (error) {
+      captureOperationalError(error, {
+        operation: "find_existing_clinic",
+        message: "Unable to check for an existing clinic",
+      });
+      return { clinic: null, failed: true };
+    }
     const page = (data as Clinic[] | null) ?? [];
     const clinic = page.find(
       (candidate) => normalizeClinicAddress(candidate.address) === address,
@@ -62,7 +70,7 @@ async function findExistingClinic(address: string, zip: string) {
 export default function SearchLogForm({
   result,
 }: {
-  result: ClinicSearchResult;
+  result: ClinicSearchTarget;
 }) {
   const [form, setForm] = useState<SearchLogFormState>({
     name: result.name,
@@ -125,7 +133,11 @@ export default function SearchLogForm({
     }
 
     const outcome = form.outcome;
-    const existing = await findExistingClinic(normalized.address, normalized.zip);
+    const existing = await findExistingClinic(
+      normalized.address,
+      form.state,
+      normalized.zip,
+    );
     if (existing.failed) {
       setSaving(false);
       setError("Couldn't save the clinic. Try again.");
@@ -185,8 +197,13 @@ export default function SearchLogForm({
         providerCount: result.providerCount ?? 1,
         specialties: result.specialties ?? [],
         npi: result.npi ?? undefined,
+        targetEnumerationType: result.enumerationType,
       });
-    } catch {
+    } catch (error) {
+      captureOperationalError(error, {
+        operation: "log_searched_clinic_call",
+        message: "Unable to log a call for a searched clinic",
+      });
       setSaving(false);
       setError("Couldn't save the clinic and call. Try again.");
       return;
@@ -214,11 +231,12 @@ export default function SearchLogForm({
 
   if (savedId) {
     return (
-      <div className="mt-3 rounded-sheet bg-verified-tint p-4">
-        <p className="text-[13px] font-medium text-verified">
+      <div className="mt-3 rounded-sheet bg-paper-2 p-4">
+        <p className="text-[13px] font-medium text-ink-2">
+          Call logged for {result.name}, NPI {result.npi}.{" "}
           {createdClinic
-            ? "Logged — the clinic is now on the map."
-            : "Logged — the existing clinic was updated."}
+            ? "The location is now on the map. This NPI-specific outcome does not set the location pin's shadowing status."
+            : "The location history was updated. This NPI-specific outcome does not change the location pin's shadowing status."}
         </p>
         <Link
           href={`/?clinic=${savedId}`}
@@ -249,40 +267,44 @@ export default function SearchLogForm({
       <input
         value={form.name}
         onChange={set("name")}
-        placeholder="Clinic name"
+        aria-label="Selected NPPES target"
         required
         maxLength={300}
+        readOnly
         className={inputClass}
       />
       <input
         value={form.phone}
         onChange={set("phone")}
-        placeholder="Phone"
+        aria-label="NPPES registry phone, unconfirmed"
         maxLength={50}
+        readOnly
         className={inputClass}
       />
       <input
         value={form.address}
         onChange={set("address")}
-        placeholder="Street address"
+        aria-label="Selected practice address"
         required
         maxLength={300}
+        readOnly
         className={inputClass}
       />
       <div className="flex gap-2">
         <input
           value={form.city}
           onChange={set("city")}
-          placeholder="City"
+          aria-label="Selected practice city"
           required
           maxLength={150}
+          readOnly
           className={inputClass}
         />
         <select
           value={form.state}
-          onChange={set("state")}
           aria-label="State"
           autoComplete="address-level1"
+          disabled
           className="rounded-pill border border-line bg-paper px-3 text-[13px] text-ink"
         >
           {US_STATES.map(({ code, name }) => (
@@ -294,10 +316,11 @@ export default function SearchLogForm({
         <input
           value={form.zip}
           onChange={set("zip")}
-          placeholder="Zip"
+          aria-label="Selected practice ZIP code"
           required
           inputMode="numeric"
           pattern="[0-9]{5}(-[0-9]{4})?"
+          readOnly
           className={`${inputClass} max-w-[100px]`}
         />
       </div>

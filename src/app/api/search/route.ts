@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 
 import { getSearchProvider } from "@/lib/search";
+import { captureOperationalError } from "@/lib/monitoring";
 import type { ClinicSearchInput } from "@/lib/search/types";
 import {
   parseSearchInput,
@@ -38,7 +39,11 @@ export async function POST(req: Request) {
       { results, query: input },
       { headers: { "Cache-Control": "no-store" } },
     );
-  } catch {
+  } catch (error) {
+    captureOperationalError(error, {
+      operation: "search_provider",
+      message: "Clinic search provider failed",
+    });
     return Response.json(
       { error: "The provider registry is temporarily unavailable. Try again." },
       { status: 502, headers: { "Cache-Control": "no-store" } },

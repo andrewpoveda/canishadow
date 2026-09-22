@@ -85,9 +85,10 @@ export default function SearchPage() {
           Find clinics to call
         </h1>
         <p className="mt-2 text-[15px] leading-[22px] text-ink-2">
-          Search the federal provider registry, call the clinic yourself, and
-          log whether they said yes or no — every logged call becomes a pin on
-          the map.
+          Search the NPPES provider registry and call the exact NPI practice
+          location shown. Registry phone numbers are unconfirmed; an active NPI
+          does not establish that a practice is open. Call history keeps the
+          selected NPI attached to the outcome.
         </p>
         <form onSubmit={search} className="mt-5 space-y-2.5">
           <div className="flex gap-2">

@@ -2,6 +2,128 @@
 
 Reverse-chronological record of what was actually built, session by session. Newest entry on top. This is the source of truth over SPEC.md when the two disagree — SPEC.md is the plan, this is what really happened.
 
+## 2026-09-22 — Keep NPPES contacts and call history on the exact target
+
+Reworked the NPPES result-to-call path after confirming that suite stripping merged
+407 E Gilbert St Suite 7 (NPI 1427857218) with Suite 1 (NPI 1487752895), and could
+associate a phone with the wrong organization. Address normalization now standardizes
+formatting while preserving suite, floor, and unit values. Search deduplicates only the
+same NPI/type at the same full practice location; different NPIs remain separate even
+at one exact address, and a phone can only follow duplicate observations of its own
+NPI/location.
+
+Search cards identify each NPI target, link only its registry phone, and label that
+number unconfirmed. The call form keeps the selected NPI and full location read-only;
+the RPC stores an immutable target snapshot on each contact log and verifies address,
+ZIP, and state against the map location. The `(address, zip)` map-location key remains
+in place. Multiple NPIs at one location share a physical map row but retain distinct
+names, NPIs, addresses, and phone snapshots in call history. NPI-specific yes/no
+outcomes do not change that shared location's status or aggregate provider/phone data.
+The migration revokes direct public contact-log writes so target validation goes
+through the RPC.
+
+Added separate pending contact reports for wrong numbers and apparently closed
+practices. They are tied to one NPI/location, never become shadowing `no` outcomes,
+and never close an organization or update map status. Wrong-number reporting is only
+offered when that selected target has a registry number. Existing ambiguous
+`clinics.phone` values are no longer displayed in the map drawer.
+
+Added regressions for the confirmed San Bernardino suite collision, distinct NPIs at
+the same suite, NPI/phone preservation through RPC arguments and displayed history,
+and separate contact reports. Added a rollback-only Supabase SQL regression script
+for schema, suite identity, shared-location target snapshots, and status separation.
+Updated MIGRATION.md, SPEC.md, and index.md for the shipped behavior.
+
+Verification: 13 TypeScript tests pass using the Node test runner with the tsx import;
+`npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. The
+standard `npm test` launcher hit a sandbox Unix-socket permission error, so the same
+test files were run directly through Node. The rollback-only SQL regression was not run
+against production. Applied migration `20260922191944_preserve_nppes_call_target_identity.sql`
+to the live CanIShadow project after confirming the old RPC, direct-write policy, and
+table grants matched its preconditions. Postflight verified the new target columns and
+report table/RPC, removal of the old RPC, suite/apartment normalization, and anon SELECT
+with no direct contact-log write privileges. Existing row counts remained 12 clinics and
+6 contact logs; `contact_reports` is empty. The matching app has not been deployed, so
+call logging through the current site is unavailable until that deploy. No production
+rows or app deployment were changed. Supabase advisors report the two intentionally
+anonymous SECURITY DEFINER RPCs, an existing leaked-password-protection warning, and
+unused-index notices (including new indexes on the empty reports table).
+
+## 2026-09-20 — Revisit the reported replay before implementation
+
+Successfully opened the authenticated PostHog recording and inspected the relevant
+search/selection sequence. Around 02:28–02:29 the visitor highlights "ARCHIS DESAI
+MD INC."; the activity timeline shows the window hidden around 02:30 and visible
+again around 03:57. Earlier hidden/visible intervals also occur after the initial
+search. This is consistent with taking a clinic name elsewhere for research, but
+the replay does not establish a clipboard copy, Google destination, or completed
+phone call. Do not confuse Andrew's own Google tabs with the visitor's recorded
+activity. The entire recording was not continuously reviewed.
+
+Product implication: an external lookup shortcut may reduce friction, but it does
+not solve the need to connect registry identities to current, location-specific
+office contact information. Implementation remains on hold at the user's request;
+no application, database, or deployment changes.
+
+## 2026-09-20 — Investigate clinic phone accuracy and registry identity collisions
+
+Read-only investigation of the reported San Bernardino search results; no application,
+database, or deployment changes. Live NPPES NPI 1427857218 supplies Apple Physicians
+Choice at 407 E Gilbert St Ste 7 with 951-204-0909, matching the production search.
+The same Family Medicine organization query also returns NPI 1487752895, San Bernardino
+Physicians Associates, at Ste 1 with 909-889-1136 (the number in the user's Google
+screenshot). Search normalizes away suites and collapses these records into the first
+organization's card. It can also borrow another grouped record's phone when the chosen
+record lacks one. SearchLogForm uses the same suite-stripping helper when matching and
+saving clinics, so a durable fix must cover both discovery and call-log association.
+These observations do not establish which number currently reaches either office.
+
+The deceased-physician example has an active organization record: NPI 1184621666,
+ABRAHAM CHEN, D.O., INC, last updated 2023-03-07. Rose Hills' obituary confirms the
+physician died July 7, 2025. An active organization NPI does not establish that the
+named physician is alive or the practice remains open. Recommended follow-up: preserve
+suite and record identity, keep name/address/phone provenance together, label registry
+contacts as unconfirmed, and add reviewed corrections/closure suppression separate
+from shadowing outcomes. Official-site contact verification can supplement discovery;
+an MCP alone does not improve the underlying data.
+
+Verification: queried the public production search and public NPPES API; inspected
+search grouping, its existing regression fixture, and the save-path normalization.
+The authenticated PostHog replay page opened in Safari, but the player stayed blank
+before Safari became unavailable; the full recording was not reviewed. Existing
+uncommitted Sentry work was preserved. No tests run because application code was unchanged.
+
+## 2026-09-13 — Add Sentry error monitoring across browser and server runtimes
+
+Ran Sentry's Next.js wizard for the `ap-med/canishadow` project and installed
+`@sentry/nextjs`. Added browser, Node.js, and edge initialization, App Router global-error
+capture, navigation trace propagation, and the `/monitoring` event tunnel. The Sentry wrapper
+composes with the existing Next.js config, so Leaflet transpilation, PostHog ingestion rewrites,
+and trailing-slash behavior remain unchanged.
+
+Kept error collection privacy-conscious: user information, cookies, headers, bodies, query
+parameters, database values, and stack-frame locals are explicitly excluded, while Session Replay
+is disabled. Performance traces sample at 100% in development and 10% in production. The
+wizard-generated build token remains in an ignored local file; it has not been copied to Vercel
+without explicit credential-transfer authorization. Runtime error delivery does not depend on that
+token, while readable production source maps do.
+
+Added targeted capture to real recoverable failure paths that automatic instrumentation cannot see:
+initial/background clinic reads, contact-history reads, call-log RPC writes, NPPES search failures,
+and Census request/response decoding failures. Existing fallback copy and HTTP statuses are
+unchanged, and expected 400/413 validation responses and legitimate geocoder no-matches are not
+reported. Handled exceptions are sanitized to generic operation errors with only allowlisted name
+and code tags, so rejected database rows cannot leak call-form values into Sentry details.
+
+Verified live delivery against Sentry with one browser exception and one API/server exception.
+The wizard example also surfaced a hydration warning caused by its own inline demo CSS; removed
+both temporary example routes after verification so the production app exposes no deliberate
+error endpoint. `npm run lint` and a production `npm run build` pass; the build was run with
+source-map upload disabled pending authorization. `npx tsc --noEmit` passes, and all six existing
+automated tests pass. A production-mode browser smoke test loaded the map and search form with no
+console errors or framework overlay; `/` and `/search` returned 200, invalid search input retained
+its existing 400 response, and both removed example routes returned 404.
+
 ## 2026-09-12 — Remove CARTO API-key watermark
 
 CARTO began requiring API keys for its previously keyless raster basemaps in late August 2026,

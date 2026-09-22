@@ -23,9 +23,21 @@
 ## Stack & conventions (match AP MED patterns)
 
 > **SUPERSEDED (map + env vars) — see MIGRATION.md §0/§7 and build-log.md 2026-07-24.**
-> The app shipped on **Leaflet + free CARTO tiles**, NOT Mapbox. There is no `NEXT_PUBLIC_MAPBOX_TOKEN`
+> The app shipped on **Leaflet + free OpenStreetMap tiles**, NOT Mapbox. There is no `NEXT_PUBLIC_MAPBOX_TOKEN`
 > — the only required secrets are the three Supabase keys (NPPES search, US Census geocode, and
-> CARTO tiles are all free/no-key). The bullets/env block below are the original pre-build plan.
+> OpenStreetMap tiles are all free/no-key). The bullets/env block below are the original pre-build plan.
+
+Current observability uses `@sentry/nextjs` across browser, Node.js, and edge runtimes. The App
+Router global error boundary reports render failures, navigation tracing is initialized through
+the instrumentation entry points, and the Next.js config tunnels browser events through
+`/monitoring` while preserving the existing PostHog rewrites. User information, cookies, headers,
+bodies, query parameters, database values, and stack-frame locals are excluded from events, and
+Session Replay is disabled; traces sample at 100% in development and 10% in production. The Sentry
+auth token is build-only and optional at runtime; it is used solely for production source-map uploads.
+Expected validation/no-match responses are not reported, while caught Supabase, NPPES, Census, and
+call-log failures are captured before the existing fallback UI or HTTP response is returned. These
+handled errors use generic messages and allowlisted error name/code tags rather than forwarding raw
+database or service error details that could echo submitted form values.
 
 - Next.js App Router + TypeScript + Tailwind, deployed on Vercel
 - Supabase (Postgres) — **new project**, not the AP MED project
@@ -45,19 +57,20 @@ SUPABASE_SERVICE_ROLE_KEY=   # seed scripts ONLY — never NEXT_PUBLIC, never im
 
 ## Database schema
 
-> **SUPERSEDED — see MIGRATION.md §1/§2 (the schema actually built + run in Supabase) and
-> build-log.md 2026-07-24.** The app shipped with **two tables** (`clinics` + `contact_logs`),
-> a **4-state** status (`unknown`/`verified_yes`/`verified_no`/`call_back`), an embedded
-> `providers` jsonb array, a separate `verified` boolean (trust axis, distinct from colour —
-> §0.1), and anonymous crowdsourced logging through an atomic, idempotent database RPC
-> (legacy public INSERT/UPDATE policies remain temporarily for rollout compatibility). The single-table,
-> 3-state, read-only-RLS design below is the original pre-build plan. The `(address, zip)` dedup
-> key and the NPPES/Census seed pipeline notes further down remain accurate. The application now
-> supports nationwide search and call logging: `state` is a validated U.S. state/territory code.
-> Production logging becomes nationwide after applying both checked-in migrations: the first
-> expands accepted states and the second installs the transactional call-log RPC and retry key.
-> Until then, the live database still accepts only NJ/NY and the new client must not deploy.
-> The original seed scope below still describes only the preloaded NJ/NYC dataset.
+> **SUPERSEDED — see MIGRATION.md §1/§2 and build-log.md.** The live rebuild uses three tables:
+> `clinics` is the map's location row with the composite `(address, zip)` key, `contact_logs`
+> stores each selected NPI/full-address target snapshot, and `contact_reports` stores pending
+> contact-quality reports separately from shadowing outcomes. Address normalization preserves
+> suites/floors/units. NPI-specific outcomes do not change a shared location pin's status, and a
+> contact report never counts as shadowing `no` or closes a wider organization.
+>
+> The app also has a **4-state** status, `providers` jsonb, a separate `verified` trust flag, and
+> anonymous idempotent call logging. The first two checked-in migrations expanded state coverage
+> and installed atomic call logging; build-log.md records them as applied to production. The
+> identity migration `20260922191944_preserve_nppes_call_target_identity.sql` is applied to
+> production. The deployed site still needs the matching client update; the old call-log RPC was
+> retired so logs cannot silently omit the selected NPI. The original seed scope below describes
+> only the preloaded NJ/NYC dataset.
 
 One table. Pins are **locations**, not individual providers.
 
@@ -75,7 +88,7 @@ create table clinics (
   phone text,
   status text not null default 'unknown'
     check (status in ('unknown','verified_yes','verified_no')),
-  provider_count int not null default 1, -- providers grouped at this address
+  provider_count int not null default 1, -- seed/map metadata; live NPI search targets stay separate
   specialties text[] not null default '{}',  -- e.g. {'Family Medicine','Pediatrics'}
   npi text,                              -- org NPI if from an NPI-2 record
   last_verified date,                    -- null until a real call happens
@@ -115,9 +128,9 @@ Source: **NPPES NPI Registry API** (`https://npiregistry.cms.hhs.gov/api/?versio
 2. `enumeration_type=NPI-1` (individuals) — these give density.
 
 **Dedupe/grouping (the step that makes the map look professional):**
-1. Normalize address: uppercase, strip suite/floor/unit tokens (`STE`, `SUITE`, `FL`, `UNIT`, `#...`), collapse whitespace, standardize `STREET→ST`, `AVENUE→AVE`, etc.
-2. Group all records by `(normalized_address, zip)`.
-3. One row per group: `provider_count` = number of NPI-1 records; `name` = NPI-2 org name if one exists in the group, else `"Medical Office — {street address}"`; `specialties` = union; `phone` = most frequent phone in group.
+1. Normalize address formatting while preserving suite/floor/unit labels and values (`STE`/`SUITE`, `FL`/`FLOOR`, `UNIT`, `#...`); standardize `STREET→ST`, `AVENUE→AVE`, etc.
+2. Keep map locations keyed by the full normalized `(address, zip)` composite, including the suite or unit.
+3. Do not merge NPI records, names, provider counts, or phones solely because they share an address. A phone stays with its source NPI and is labeled unconfirmed; combine provider metadata only when NPPES explicitly identifies a relationship to the same clinic.
 4. Skip hospital campuses if they dominate (optional flag): addresses with provider_count > 75 are probably a hospital — keep them but they're low-value cold-call targets.
 
 **Zip lists** (put in `data/zips.ts`):
@@ -150,7 +163,7 @@ canishadow/
 │   │   └── api/clinics/route.ts  # GET all clinics (force-dynamic) — used for client refresh
 │   ├── components/
 │   │   ├── MapView.tsx           # 'use client' — react-map-gl Map + cluster layer + markers
-│   │   ├── ClinicDrawer.tsx      # bottom sheet: name, status badge, address, phone, specialties, provider_count, last_verified
+│   │   ├── ClinicDrawer.tsx      # bottom sheet: location name/status/address and target-aware call history
 │   │   ├── FilterBar.tsx         # floating pills: All / Verified Yes / Unverified
 │   │   └── Legend.tsx            # gray/green/red key, collapsible
 │   ├── lib/supabase.ts           # anon client (same pattern as AP MED)
@@ -170,7 +183,7 @@ canishadow/
 
 - **Full-screen map**, mobile-first. Initial viewport centered ~40.72, -74.10 (between Newark and lower Manhattan), zoom ~10.5.
 - **Clustering ON** (`react-map-gl` + supercluster or Mapbox's built-in cluster source). Unclustered pin colors: gray `#9CA3AF` (unknown), green `#16A34A` (verified_yes), red `#DC2626` (verified_no). Verified pins slightly larger + subtle pulse on green.
-- **Tap pin → bottom drawer** (mobile sheet, ~40% height, swipe to dismiss): clinic name, status badge, address, tappable phone (`tel:` link), specialties chips, "{n} providers at this location", "Last verified {date}" or "Not yet verified — want us to call? 👀".
+- **Tap pin → bottom drawer** (mobile sheet, ~40% height, swipe to dismiss): location name, status badge, address, map-level provider metadata, and contact history. Do not show a location-level phone when its NPI/source is ambiguous; NPPES phone links stay with their individual search result and are labeled unconfirmed. NPI-specific call outcomes do not set location status.
 - **FilterBar**: three pills top-center — All / ✅ Verified / Unverified. Filtering re-renders the source data client-side.
 - **Header**: minimal — "CanIShadow" wordmark left, GitHub icon right. No nav.
 - **Footer line in drawer or about modal**: "Free & open source. Built by Andrew Poveda · AP MED".
@@ -232,7 +245,7 @@ Pitch lines:
 >
 > **Phase 1:** Project scaffold per the file tree in the spec. Supabase client in `src/lib/supabase.ts`, `Clinic` type in `src/types/clinic.ts` matching the schema exactly. `.env.local.example` with the four env vars. Checkpoint: `npm run dev` renders an empty full-screen Mapbox map centered on 40.72,-74.10.
 >
-> **Phase 2:** `scripts/seed-nppes.ts` per the spec's seed pipeline — respect the 1,200-result-per-query API cap by iterating zip × taxonomy, post-filter by taxonomy code prefixes 207Q/207R/2080, use LOCATION addresses only, normalize + group by address, insert with the service role key. Make it idempotent (upsert on normalized address+zip). Then `scripts/geocode.ts` using the US Census batch geocoder (NOT Mapbox — TOS). Checkpoint: row counts printed per region.
+> **Phase 2:** `scripts/seed-nppes.ts` per the seed pipeline — respect the 1,200-result-per-query API cap by iterating zip × taxonomy, post-filter by taxonomy code prefixes 207Q/207R/2080, and use LOCATION addresses only. Normalize formatting while preserving suite/floor/unit identity. Keep map rows on the `(address, zip)` composite; do not merge different NPIs, names, or phones by address alone. Store target-specific source details separately. Make location imports idempotent on the full normalized address+ZIP. Then `scripts/geocode.ts` using the US Census batch geocoder (NOT Mapbox — TOS). Checkpoint: row counts printed per region.
 >
 > **Phase 3:** MapView with clustering, status-colored pins, ClinicDrawer bottom sheet, FilterBar, Legend, per the UI spec. `export const dynamic = 'force-dynamic'` on any route touching Supabase. Checkpoint: full demo flow on a 390px viewport.
 >

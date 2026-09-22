@@ -28,6 +28,20 @@ export type ClinicSearchResult = {
   specialties?: string[];
   enumerationType?: NpiEnumerationType;
   providerCount?: number;
+  phoneSource?: "NPPES NPI Registry";
+  phoneStatus?: "unconfirmed";
+};
+
+/** A registry result with enough immutable identity to be called or reported safely. */
+export type ClinicSearchTarget = ClinicSearchResult & {
+  address: string;
+  city: string;
+  state: UsStateCode;
+  zip: string;
+  npi: string;
+  enumerationType: NpiEnumerationType;
+  phoneSource: "NPPES NPI Registry";
+  phoneStatus: "unconfirmed";
 };
 
 export interface ClinicSearchProvider {

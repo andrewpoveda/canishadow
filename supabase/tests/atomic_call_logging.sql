@@ -18,7 +18,7 @@ begin
   select public.log_clinic_call(
     v_submission_key, null, 'yes', null, 'QA', null, 'atomic test',
     'QA ATOMIC CLINIC', v_address, 'LOS ANGELES', 'CA', '90001',
-    34.0522, -118.2437, null, 1, array['Family Medicine'], null
+    34.0522, -118.2437, null, 1, array['Family Medicine'], null, null
   ) into v_result;
 
   if v_result->>'created' <> 'true' then
@@ -40,7 +40,7 @@ begin
   select public.log_clinic_call(
     v_submission_key, null, 'yes', null, 'QA', null, 'atomic test',
     'QA ATOMIC CLINIC', v_address, 'LOS ANGELES', 'CA', '90001',
-    34.0522, -118.2437, null, 1, array['Family Medicine'], null
+    34.0522, -118.2437, null, 1, array['Family Medicine'], null, null
   ) into v_retry;
   if (v_retry->'log'->>'id')::uuid <> v_log_id then
     raise exception 'idempotent retry returned a different log';
@@ -61,7 +61,7 @@ begin
 
   perform public.log_clinic_call(
     v_verified_key, v_verified_id, 'no', 'Dr. QA', 'Anonymous QA', null, null,
-    null, null, null, null, null, null, null, null, 1, '{}', null
+    null, null, null, null, null, null, null, null, 1, '{}', null, null
   );
   select * into v_clinic from public.clinics where id = v_verified_id;
   if v_clinic.status <> 'verified_yes'

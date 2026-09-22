@@ -1,5 +1,7 @@
 export const runtime = "nodejs";
 
+import * as Sentry from "@sentry/nextjs";
+import { captureOperationalError } from "@/lib/monitoring";
 import { isUsStateCode } from "@/lib/us-states";
 
 // Free US Census geocoder (MIGRATION.md §4 / SPEC.md §Seed) — no key, no billing, results
@@ -72,19 +74,34 @@ export async function POST(req: Request) {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
-  } catch {
+  } catch (error) {
+    captureOperationalError(error, {
+      operation: "geocode_census_request",
+      message: "Census geocoder request failed",
+    });
     return Response.json({ error: "geocoder unavailable" }, { status: 502 });
   } finally {
     clearTimeout(timeout);
   }
   if (!res.ok) {
+    Sentry.captureMessage("Census geocoder returned an error response", {
+      level: "error",
+      tags: {
+        operation: "geocode_census_response",
+        status_code: res.status,
+      },
+    });
     return Response.json({ error: "geocoder unavailable" }, { status: 502 });
   }
 
   let data: CensusResponse;
   try {
     data = (await res.json()) as CensusResponse;
-  } catch {
+  } catch (error) {
+    captureOperationalError(error, {
+      operation: "geocode_census_decode",
+      message: "Unable to decode the Census geocoder response",
+    });
     return Response.json({ error: "geocoder unavailable" }, { status: 502 });
   }
   const match = data?.result?.addressMatches?.[0];

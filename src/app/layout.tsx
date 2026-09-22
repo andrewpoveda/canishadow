@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import * as Sentry from "@sentry/nextjs";
 import "./globals.css";
 import { PostHogProvider } from "./providers";
 
@@ -16,18 +17,23 @@ const mono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
 });
 
-export const metadata: Metadata = {
-  title: "CanIShadow — clinics that take shadowing students",
-  description:
-    "Open-source map of U.S. clinics that do or don't take shadowing students. Every green pin is a verified phone call. Free & open source, built by Andrew Poveda · AP MED.",
-  metadataBase: new URL("https://canishadow.com"),
-  openGraph: {
-    title: "CanIShadow",
+export function generateMetadata(): Metadata {
+  return {
+    title: "CanIShadow — clinics that take shadowing students",
     description:
-      "Open-source map of U.S. clinics that take shadowing students. Every green pin is a verified phone call.",
-    type: "website",
-  },
-};
+      "Open-source map of U.S. clinics that do or don't take shadowing students. Every green pin is a verified phone call. Free & open source, built by Andrew Poveda · AP MED.",
+    metadataBase: new URL("https://canishadow.com"),
+    openGraph: {
+      title: "CanIShadow",
+      description:
+        "Open-source map of U.S. clinics that take shadowing students. Every green pin is a verified phone call.",
+      type: "website",
+    },
+    other: {
+      ...Sentry.getTraceData(),
+    },
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: "#FAF9F6",

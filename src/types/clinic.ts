@@ -59,6 +59,38 @@ export interface ContactLog {
   contact_email: string | null;
   /** Client-generated idempotency key; null only for legacy ledger rows. */
   submission_key: string | null;
+  /** Immutable snapshot of the exact target selected when this call was logged. */
+  target_npi: string | null;
+  target_enumeration_type: "NPI-1" | "NPI-2" | null;
+  target_name: string | null;
+  target_address: string | null;
+  target_city: string | null;
+  target_state: UsStateCode | null;
+  target_zip: string | null;
+  target_phone: string | null;
+  target_specialties: string[] | null;
+  target_source: string | null;
+  target_phone_source: string | null;
+  target_phone_status: "unconfirmed" | null;
+}
+
+/** A contact-quality report is separate from a shadowing-call outcome. */
+export interface ContactReport {
+  id: string;
+  created_at: string;
+  clinic_id: string | null;
+  reason: "wrong_number" | "practice_closed";
+  target_npi: string;
+  target_enumeration_type: "NPI-1" | "NPI-2";
+  target_name: string;
+  target_address: string;
+  target_city: string;
+  target_state: UsStateCode;
+  target_zip: string;
+  target_phone: string | null;
+  target_source: "NPPES NPI Registry";
+  review_status: "pending_review" | "reviewed";
+  submission_key: string | null;
 }
 
 /** Insert payloads — derived from the row types so schema drift is a compile error. */

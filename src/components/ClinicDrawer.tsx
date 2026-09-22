@@ -116,14 +116,6 @@ export default function ClinicDrawer({
               <p className="mt-3 text-[15px] leading-[22px] text-ink-2">
                 {clinic.address}, {clinic.city}, {clinic.state} {clinic.zip}
               </p>
-              {clinic.phone && (
-                <a
-                  href={`tel:${clinic.phone}`}
-                  className="mt-1 inline-block py-1 text-[15px] font-medium text-ink"
-                >
-                  {clinic.phone}
-                </a>
-              )}
               <ProviderList clinic={clinic} />
               <div className="mt-4">
                 <StatusBadge status={status} />

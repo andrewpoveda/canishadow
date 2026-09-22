@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { track } from "@/lib/analytics";
 import { logClinicCall, type CallOutcome } from "@/lib/log-clinic-call";
+import { captureOperationalError } from "@/lib/monitoring";
 import type { Clinic, ContactLog } from "@/types/clinic";
 
 // The database transaction derives status while holding the clinic row lock, so simultaneous
@@ -46,7 +47,11 @@ export default function LogCallForm({
         contactEmail,
         notes,
       });
-    } catch {
+    } catch (error) {
+      captureOperationalError(error, {
+        operation: "log_existing_clinic_call",
+        message: "Unable to log a call for an existing clinic",
+      });
       setSaving(false);
       setError("Couldn't save that call. Try again.");
       return;

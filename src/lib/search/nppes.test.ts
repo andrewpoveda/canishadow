@@ -61,7 +61,7 @@ test("rejects invalid request shapes, states, and specialties", () => {
   );
 });
 
-test("queries NPI-1 and NPI-2, maps exact secondary locations, and dedupes by address plus ZIP", async () => {
+test("queries both NPI types, maps exact secondary locations, and keeps each NPI/location separate", async () => {
   const calls: URL[] = [];
   const fetchImpl: typeof fetch = async (input) => {
     const url = new URL(String(input));
@@ -81,7 +81,7 @@ test("queries NPI-1 and NPI-2, maps exact secondary locations, and dedupes by ad
               city: "NEW YORK",
               state: "NY",
               postal_code: "100041234",
-              telephone_number: "212-555-0100",
+              telephone_number: null,
             },
           ],
           taxonomies: familyMedicine,
@@ -111,6 +111,26 @@ test("queries NPI-1 and NPI-2, maps exact secondary locations, and dedupes by ad
         practiceLocations: [
           {
             address_1: "10 BROADWAY SUITE 400",
+            city: "NEW YORK",
+            state: "NY",
+            postal_code: "100041234",
+            telephone_number: "212-555-0101",
+          },
+        ],
+        taxonomies: familyMedicine,
+      },
+      {
+        number: "2222222222",
+        enumeration_type: "NPI-1",
+        basic: {
+          first_name: "Avery",
+          last_name: "Doctor",
+          credential: "MD",
+          status: "A",
+        },
+        practiceLocations: [
+          {
+            address_1: "10 Broadway Suite 400",
             city: "NEW YORK",
             state: "NY",
             postal_code: "100041234",
@@ -182,10 +202,10 @@ test("queries NPI-1 and NPI-2, maps exact secondary locations, and dedupes by ad
     assert.equal(url.searchParams.get("limit"), "200");
   }
 
-  assert.equal(results.length, 2);
+  assert.equal(results.length, 4);
   assert.deepEqual(results[0], {
     name: "Downtown Family Health",
-    phone: "212-555-0100",
+    phone: undefined,
     address: "10 Broadway Ste 200",
     city: "NEW YORK",
     state: "NY",
@@ -193,16 +213,152 @@ test("queries NPI-1 and NPI-2, maps exact secondary locations, and dedupes by ad
     npi: "1111111111",
     specialties: ["Family Medicine"],
     enumerationType: "NPI-2",
-    providerCount: 2,
+    providerCount: undefined,
+    phoneSource: "NPPES NPI Registry",
+    phoneStatus: "unconfirmed",
   });
-  assert.equal(results[1].address, "20 Madison Ave");
-  assert.equal(results[1].city, "NEW YORK");
-  assert.equal(results[1].state, "NY");
-  assert.equal(results[1].phone, "212-555-0200");
-  assert.notEqual(results[1].address, "99 Main Street");
+  assert.equal(results[1].npi, "2222222222");
+  assert.equal(results[1].name, "Avery Doctor, MD");
+  assert.equal(results[1].address, "10 BROADWAY SUITE 400");
+  assert.equal(results[1].phone, "212-555-0101");
+  assert.equal(results[1].providerCount, 1);
+  assert.equal(results[2].npi, "3333333333");
+  assert.equal(results[2].address, "10 BROADWAY FL 3");
+  assert.equal(results[2].phone, "212-555-0102");
+  assert.notEqual(results[2].address, "99 Main Street");
+  assert.equal(results[3].npi, "4444444444");
+  assert.equal(results[3].address, "20 Madison Ave");
+  assert.equal(results[3].phone, "212-555-0200");
 
   await provider.search(input);
   assert.equal(calls.length, 2, "repeat searches should use the bounded TTL cache");
+});
+
+test("keeps the confirmed San Bernardino suite collision as two exact NPI targets", async () => {
+  const organizations = [
+    {
+      number: "1427857218",
+      enumeration_type: "NPI-2",
+      basic: { organization_name: "Apple Physicians Choice", status: "A" },
+      addresses: [
+        {
+          address_purpose: "LOCATION",
+          address_1: "407 E Gilbert St Ste 7",
+          city: "SAN BERNARDINO",
+          state: "CA",
+          postal_code: "92404",
+          telephone_number: "951-204-0909",
+        },
+      ],
+      taxonomies: familyMedicine,
+    },
+    {
+      number: "1487752895",
+      enumeration_type: "NPI-2",
+      basic: { organization_name: "San Bernardino Physicians Associates", status: "A" },
+      addresses: [
+        {
+          address_purpose: "LOCATION",
+          address_1: "407 E Gilbert St Ste 1",
+          city: "SAN BERNARDINO",
+          state: "CA",
+          postal_code: "92404",
+          telephone_number: "909-889-1136",
+        },
+      ],
+      taxonomies: familyMedicine,
+    },
+  ];
+  const provider = createNppesProvider({
+    fetchImpl: async (input) =>
+      new URL(String(input)).searchParams.get("enumeration_type") === "NPI-2"
+        ? nppesResponse(organizations)
+        : nppesResponse([]),
+    retries: 0,
+  });
+
+  const results = await provider.search({
+    city: "San Bernardino",
+    state: "CA",
+    specialty: "Family Medicine",
+  });
+
+  assert.equal(results.length, 2);
+  assert.deepEqual(
+    results.map(({ npi, name, address, phone }) => ({ npi, name, address, phone })),
+    [
+      {
+        npi: "1427857218",
+        name: "Apple Physicians Choice",
+        address: "407 E Gilbert St Ste 7",
+        phone: "951-204-0909",
+      },
+      {
+        npi: "1487752895",
+        name: "San Bernardino Physicians Associates",
+        address: "407 E Gilbert St Ste 1",
+        phone: "909-889-1136",
+      },
+    ],
+  );
+});
+
+test("does not merge distinct NPIs at an identical suite or borrow their phone numbers", async () => {
+  const provider = createNppesProvider({
+    fetchImpl: async (input) =>
+      new URL(String(input)).searchParams.get("enumeration_type") === "NPI-2"
+        ? nppesResponse([
+            {
+              number: "1111111111",
+              enumeration_type: "NPI-2",
+              basic: { organization_name: "Broadway Clinic A", status: "A" },
+              addresses: [
+                {
+                  address_purpose: "LOCATION",
+                  address_1: "10 Broadway Suite 4",
+                  city: "NEW YORK",
+                  state: "NY",
+                  postal_code: "10004",
+                  telephone_number: "212-555-0101",
+                },
+              ],
+              taxonomies: familyMedicine,
+            },
+            {
+              number: "2222222222",
+              enumeration_type: "NPI-2",
+              basic: { organization_name: "Broadway Clinic B", status: "A" },
+              addresses: [
+                {
+                  address_purpose: "LOCATION",
+                  address_1: "10 Broadway Suite 4",
+                  city: "NEW YORK",
+                  state: "NY",
+                  postal_code: "10004",
+                  telephone_number: "212-555-0102",
+                },
+              ],
+              taxonomies: familyMedicine,
+            },
+          ])
+        : nppesResponse([]),
+    retries: 0,
+  });
+
+  const results = await provider.search({
+    city: "New York",
+    state: "NY",
+    specialty: "Family Medicine",
+  });
+
+  assert.equal(results.length, 2);
+  assert.deepEqual(
+    results.map(({ npi, name, phone }) => [npi, name, phone]),
+    [
+      ["1111111111", "Broadway Clinic A", "212-555-0101"],
+      ["2222222222", "Broadway Clinic B", "212-555-0102"],
+    ],
+  );
 });
 
 test("an all-primary-care search makes targeted queries instead of filtering a broad page", async () => {
