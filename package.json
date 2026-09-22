@@ -13,6 +13,7 @@
     "seed:nppes": "tsx scripts/seed-nppes.ts"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.74.0",
     "@supabase/supabase-js": "^2.47.10",
     "date-fns": "^3.6.0",
     "framer-motion": "^11.15.0",
