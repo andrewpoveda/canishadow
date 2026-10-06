@@ -38,6 +38,10 @@ Expected validation/no-match responses are not reported, while caught Supabase, 
 call-log failures are captured before the existing fallback UI or HTTP response is returned. These
 handled errors use generic messages and allowlisted error name/code tags rather than forwarding raw
 database or service error details that could echo submitted form values.
+The browser-only `beforeSend` filter excludes CANISHADOW-4's exact unhandled `getReader`
+TypeError signature only when its stack consists entirely of injected `<script>` frames and
+`ext:core/01_core.js` runtime frames. Missing evidence, application frames, other messages,
+and chained exceptions remain reportable; server and edge reporting are unchanged.
 
 - Next.js App Router + TypeScript + Tailwind, deployed on Vercel
 - Supabase (Postgres) — **new project**, not the AP MED project
