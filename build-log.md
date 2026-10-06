@@ -2,6 +2,28 @@
 
 Reverse-chronological record of what was actually built, session by session. Newest entry on top. This is the source of truth over SPEC.md when the two disagree — SPEC.md is the plan, this is what really happened.
 
+## 2026-10-06 — Prepare the Sentry fix for PR validation
+
+Prepared the CANISHADOW-4 filter and regression tests for a pull request. The repository
+had no GitHub Actions workflows, so added CI on pull requests and main pushes using
+Node 22, npm ci, tests, TypeScript, and lint with read-only repository permissions and
+no production secrets. Updated index.md. Merge remains a separate user decision.
+
+## 2026-10-06 — Filter CANISHADOW-4's injected-runtime error
+
+Inspected Sentry issue 7776644769 through the user's authenticated browser after the
+API rejected the available token. Its single production event reports an unhandled
+getReader TypeError with only anonymous script and Deno `ext:core/01_core.js` frames,
+which indicates an external runtime rather than an application stack. Added a
+browser-only beforeSend filter for that exact message, mechanism, and stack signature.
+It retains matching messages with application frames, missing stack evidence, other
+errors, and chained exceptions. Server/edge monitoring and application behavior are
+unchanged. Updated SPEC.md and index.md with the filter behavior.
+
+Verification: all 16 Node/tsx tests pass, including three filter regressions;
+TypeScript, Next.js lint, and git diff whitespace checks pass. No production deploy
+or Sentry issue-status change was made; the filter takes effect on the next deploy.
+
 ## 2026-09-22 — Keep NPPES contacts and call history on the exact target
 
 Reworked the NPPES result-to-call path after confirming that suite stripping merged
